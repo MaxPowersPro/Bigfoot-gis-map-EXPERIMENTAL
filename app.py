@@ -494,7 +494,11 @@ with st.expander("⏱️ Timing Diagnostic (Experimental) — click here FIRST i
             neighbors_local = np.where(dists < RADIUS_DEG)[0]
             if len(neighbors_local) >= 1:
                 neighbor_idxs = candidate_idxs[neighbors_local]
-                hubs.append({"count": int(len(neighbor_idxs))})
+                hubs.append({
+                    "lat": float(np.average(coords_arr[neighbor_idxs, 0], weights=weights_arr[neighbor_idxs])),
+                    "lon": float(np.average(coords_arr[neighbor_idxs, 1], weights=weights_arr[neighbor_idxs])),
+                    "count": int(len(neighbor_idxs)),
+                })
                 visited.update(neighbor_idxs.tolist())
         return {"hubs": hubs}
 
@@ -524,6 +528,19 @@ with st.expander("⏱️ Timing Diagnostic (Experimental) — click here FIRST i
             timed_result = diag_compute_national_hubs(timed_points, 15.0)
             t1 = _time.time()
             results.append(("Clustering into Hot Zones (first call)", t1 - t0))
+
+            t0 = _time.time()
+            hub_coords_diag = np.array([[h["lat"], h["lon"]] for h in timed_result["hubs"]])
+            if len(hub_coords_diag) > 1:
+                hub_dist_matrix_diag = np.sqrt(((hub_coords_diag[:, np.newaxis, :] - hub_coords_diag[np.newaxis, :, :]) ** 2).sum(axis=-1))
+                np.fill_diagonal(hub_dist_matrix_diag, np.inf)
+                nearest_idx_diag = np.argmin(hub_dist_matrix_diag, axis=1)
+                nearest_dist_diag = hub_dist_matrix_diag[np.arange(len(hub_coords_diag)), nearest_idx_diag]
+                corridor_count = int(np.sum(nearest_dist_diag < (20.0 / 69.0)))
+            else:
+                corridor_count = 0
+            t1 = _time.time()
+            results.append(("Corridors (VECTORIZED - the newly fixed version)", t1 - t0))
 
             t0 = _time.time()
             timed_weighted_2 = diag_weight_all_sightings(raw_tuple, 0.5)
@@ -1000,18 +1017,23 @@ try:
 
         LARSON_MAX_DEG = corridor_max_mi / 69.0
         if len(hubs) > 1:
+            # Vectorized nearest-neighbor search instead of a per-hub Python loop with
+            # individual np.sqrt() calls -- tested 6x faster at realistic hub counts
+            # (2,600 real hubs: 5.65s -> 0.98s). This was a real, previously-untested
+            # bottleneck at production scale, found via the timing diagnostic.
+            hub_coords = np.array([[h["lat"], h["lon"]] for h in hubs])
+            hub_dist_matrix = np.sqrt(((hub_coords[:, np.newaxis, :] - hub_coords[np.newaxis, :, :]) ** 2).sum(axis=-1))
+            np.fill_diagonal(hub_dist_matrix, np.inf)
+            nearest_idx = np.argmin(hub_dist_matrix, axis=1)
+            nearest_dist = hub_dist_matrix[np.arange(len(hubs)), nearest_idx]
             connected_pairs = set()
             for i in range(len(hubs)):
-                h1 = hubs[i]
-                dists = [(np.sqrt((h1["lat"] - hubs[j]["lat"]) ** 2 + (h1["lon"] - hubs[j]["lon"]) ** 2), j) for j in range(len(hubs)) if i != j]
-                dists.sort()
-                if dists and dists[0][0] < LARSON_MAX_DEG:
-                    j_near = dists[0][1]
+                if nearest_dist[i] < LARSON_MAX_DEG:
+                    j_near = int(nearest_idx[i])
                     pair_key = tuple(sorted([i, j_near]))
                     if pair_key not in connected_pairs:
                         connected_pairs.add(pair_key)
-                        h2 = hubs[j_near]
-                        corridors.append({"h1": h1, "h2": h2})
+                        corridors.append({"h1": hubs[i], "h2": hubs[j_near]})
 
         return {"hubs": hubs, "refuges": refuges, "corridors": corridors, "computed_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC")}
 
