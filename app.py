@@ -543,6 +543,35 @@ with st.expander("⏱️ Timing Diagnostic (Experimental) — click here FIRST i
             results.append(("Corridors (VECTORIZED - the newly fixed version)", t1 - t0))
 
             t0 = _time.time()
+            diag_esi_points = tuple(
+                (float(s["latitude"]), float(s["longitude"]), float(s.get("evidence_weight", 1.0)), float(s.get("esi_score", 0.5)))
+                for s in timed_weighted
+            )
+            diag_coords_r = np.array([[p[0], p[1]] for p in diag_esi_points])
+            diag_esi_arr = np.array([p[3] for p in diag_esi_points])
+            min_lat_r, max_lat_r = diag_coords_r[:, 0].min(), diag_coords_r[:, 0].max()
+            min_lon_r, max_lon_r = diag_coords_r[:, 1].min(), diag_coords_r[:, 1].max()
+            GRID_STEP_DEG_DIAG = 0.3
+            lat_grid_diag = np.arange(min_lat_r - 0.15, max_lat_r + 0.15, GRID_STEP_DEG_DIAG)
+            lon_grid_diag = np.arange(min_lon_r - 0.15, max_lon_r + 0.15, GRID_STEP_DEG_DIAG)
+            total_grid_pts = len(lat_grid_diag) * len(lon_grid_diag)
+            refuge_candidates = 0
+            for g_lat in lat_grid_diag:
+                for g_lon in lon_grid_diag:
+                    dists_deg_r = np.sqrt((diag_coords_r[:, 0] - g_lat) ** 2 + (diag_coords_r[:, 1] - g_lon) ** 2)
+                    if float(np.min(dists_deg_r)) < (10.0 / 69.0):
+                        continue
+                    in_rad = dists_deg_r <= 0.6
+                    if not np.any(in_rad):
+                        continue
+                    idw_w = 1.0 / (dists_deg_r[in_rad] + 0.02) ** 2
+                    esi_p = float(np.sum(idw_w * diag_esi_arr[in_rad]) / np.sum(idw_w))
+                    if esi_p >= 0.55:
+                        refuge_candidates += 1
+            t1 = _time.time()
+            results.append((f"Predictive Refuge grid scan ({total_grid_pts:,} real grid points, bounding box {max_lat_r-min_lat_r:.0f}° x {max_lon_r-min_lon_r:.0f}°)", t1 - t0))
+
+            t0 = _time.time()
             timed_weighted_2 = diag_weight_all_sightings(raw_tuple, 0.5)
             t1 = _time.time()
             results.append(("Weighting ALL sightings nationally (SECOND call, should hit cache)", t1 - t0))
