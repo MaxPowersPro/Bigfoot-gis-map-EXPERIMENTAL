@@ -484,26 +484,8 @@ with st.sidebar:
     st.header("⚙️ Field Controls")
     if not st.secrets.get("MAPBOX_TOKEN", ""):
         st.caption("⚠️ No MAPBOX_TOKEN set in Secrets — area search won't work until this is added. Device GPS still works.")
-
-    with st.expander("📂 Load a Saved Search"):
-        loaded_file = st.file_uploader("Upload a saved search file (.json)", type=["json"], key="load_search_uploader")
-        if loaded_file is not None and st.button("Jump to this saved search"):
-            import json as _json
-            try:
-                saved = _json.loads(loaded_file.read())
-                st.session_state.user_lat = saved["lat"]
-                st.session_state.user_lon = saved["lon"]
-                st.session_state.location_name = saved.get("location_name", "Loaded Search")
-                st.session_state.radius_miles_key = saved.get("radius_miles", 100)
-                for layer_key, layer_val in saved.get("layers", {}).items():
-                    st.session_state[layer_key] = layer_val
-                st.success(f"Loaded: {saved.get('location_name', 'saved search')}")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Couldn't read that file: {e}")
-
     loc_search = st.text_input("📍 Target Search Area", value=loc_name)
-    radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250, 500], index=2, key="radius_miles_key")
+    radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250, 500], index=2)
     deg_delta = radius_miles / 69.0
 
     col_s1, col_s2 = st.columns(2)
@@ -525,35 +507,13 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🗺️ Active Map Layers")
-    show_bfro = st.checkbox("1. 👣 Sightings (Dual Footprints)", value=True, key="layer_bfro")
-    show_lore = st.checkbox("2. 🪶 Native American Lore Net", value=True, key="layer_lore")
-    show_news = st.checkbox("3. 📰 Press Archives Net", value=True, key="layer_news")
-    show_hotspots = st.checkbox("4. 🚨 Hot Zones, Refuges & The Larson Hypothesis", value=True, key="layer_hotspots")
-    show_audio = st.checkbox("5. 🔊 Infrasound / Acoustic Masking", value=True, key="layer_audio")
-    show_user_logs = st.checkbox("6. ⚠️ Community Field Logs", value=True, key="layer_user_logs")
-    show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True, key="layer_camps")
-
-    st.markdown("---")
-    save_search_payload = {
-        "location_name": loc_name,
-        "lat": lat,
-        "lon": lon,
-        "radius_miles": radius_miles,
-        "layers": {
-            "layer_bfro": show_bfro, "layer_lore": show_lore, "layer_news": show_news,
-            "layer_hotspots": show_hotspots, "layer_audio": show_audio,
-            "layer_user_logs": show_user_logs, "layer_camps": show_camps,
-        },
-    }
-    import json as _json
-    st.download_button(
-        "💾 Save This Search",
-        data=_json.dumps(save_search_payload, indent=2),
-        file_name=f"saved_search_{loc_name.replace(' ', '_').replace(',', '')[:30]}.json",
-        mime="application/json",
-        use_container_width=True,
-        help="Downloads a small file to your device with this exact location, radius, and layer setup. Load it back anytime with 'Load a Saved Search' above.",
-    )
+    show_bfro = st.checkbox("1. 👣 Sightings (Dual Footprints)", value=True)
+    show_lore = st.checkbox("2. 🪶 Native American Lore Net", value=True)
+    show_news = st.checkbox("3. 📰 Press Archives Net", value=True)
+    show_hotspots = st.checkbox("4. 🚨 Hot Zones, Refuges & The Larson Hypothesis", value=True)
+    show_audio = st.checkbox("5. 🔊 Infrasound / Acoustic Masking", value=True)
+    show_user_logs = st.checkbox("6. ⚠️ Community Field Logs", value=True)
+    show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True)
 
 # ==========================================
 # ADJUSTABLE MODEL ASSUMPTIONS — set defaults once; the Math & Science Drawer below the
@@ -787,193 +747,122 @@ if show_user_logs and user_logs_data:
         log_popup = f"<b>📝 FIELD LOG</b><br><small>Type: {ulog.get('observation_type')}</small><br><p style='font-size:10px;'>{ulog.get('physical_evidence_notes') or ulog.get('field_narrative', '')}</p>"
         folium.Marker([ulog["latitude"], ulog["longitude"]], popup=log_popup, icon=folium.Icon(color="green" if has_facts else "orange", icon="clipboard", prefix="fa")).add_to(m)
 
-# NATIONAL Hot Zones, Predictive Refuges & Larson Hypothesis corridors -- computed ONCE
-# across the entire dataset, cached, shared by every user. Fixes two people a mile apart
-# seeing different zones. Wrapped in a single try/except this time -- if ANYTHING inside
-# fails, for any reason, the map still renders with everything else intact instead of
-# going blank with no error, which is what happened on the last attempt.
+# RESTORED: Hot Zones, Predictive Refuges & The Larson Hypothesis corridors
 ground_truth_hubs, predictive_refuges = [], []
-larson_corridor_count = 0
-zones_computed_at = None
+combined_evidence_points = [
+    {"lat": float(s["latitude"]), "lon": float(s["longitude"]), "weight": float(s.get("evidence_weight", 1.0)), "esi": float(s.get("esi_score", 0.5))}
+    for s in sightings_data if not filter_urban(float(s["latitude"]), float(s["longitude"]))
+]
 
-try:
-    @st.cache_data(ttl=86400, show_spinner=True)
-    def compute_national_zones(evidence_points, hotzone_radius_mi, report_gap_mi, esi_threshold, corridor_max_mi):
-        import datetime
-        hubs, refuges, corridors = [], [], []
-        if not evidence_points:
-            return {"hubs": hubs, "refuges": refuges, "corridors": corridors, "computed_at": None}
+if show_hotspots and combined_evidence_points:
+    coords_arr = np.array([[pt["lat"], pt["lon"]] for pt in combined_evidence_points])
+    weights_arr = np.array([pt["weight"] for pt in combined_evidence_points])
+    dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
+    visited = set()
+    RADIUS_DEG = st.session_state.param_hotzone_radius_mi / 69.0
 
-        coords_arr = np.array([[p[0], p[1]] for p in evidence_points])
-        weights_arr = np.array([p[2] for p in evidence_points])
-        esi_arr = np.array([p[3] for p in evidence_points])
+    # Red Hot Zones: weighted density hubs (sightings + implicit press/lore boost via evidence_weight)
+    for i, pt in enumerate(coords_arr):
+        if i in visited: continue
+        neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
+        if len(neighbors) >= 1:
+            ground_truth_hubs.append({
+                "lat": np.average(coords_arr[neighbors, 0], weights=weights_arr[neighbors]),
+                "lon": np.average(coords_arr[neighbors, 1], weights=weights_arr[neighbors]),
+                "weight": float(np.sum(weights_arr[neighbors])),
+                "count": len(neighbors)
+            })
+            visited.update(neighbors)
 
-        RADIUS_DEG = hotzone_radius_mi / 69.0
-        # Grid-bucketed hub finding instead of a full O(n^2) distance matrix -- ~35-40x
-        # faster on the real dataset size, and fixes a real double-counting bug the old
-        # full-matrix version had: a point sitting between two cluster seeds could get
-        # counted into BOTH hubs' totals, inflating weight. This version explicitly
-        # excludes already-claimed points from new clusters, so no point is ever counted twice.
-        cell_size = RADIUS_DEG * 2
-        cell_of = {}
-        for idx, (la, lo) in enumerate(coords_arr):
-            key = (int(la // cell_size), int(lo // cell_size))
-            cell_of.setdefault(key, []).append(idx)
+    for hub in ground_truth_hubs:
+        folium.Circle(radius=8000 + (hub['weight'] * 1500), location=[hub['lat'], hub['lon']], color="#e74c3c", weight=2, dash_array="5, 8", fill=True, fill_color="#e74c3c", fill_opacity=0.15, popup=f"🚨 Hot Zone ({hub['count']} evidence points, Total Weight: {hub['weight']:.1f}x)").add_to(m)
 
-        visited = set()
-        for i in range(len(coords_arr)):
-            if i in visited: continue
-            la, lo = coords_arr[i]
-            cell_key = (int(la // cell_size), int(lo // cell_size))
-            candidate_idxs = []
-            for d_lat in (-1, 0, 1):
-                for d_lon in (-1, 0, 1):
-                    candidate_idxs.extend(cell_of.get((cell_key[0] + d_lat, cell_key[1] + d_lon), []))
-            candidate_idxs = np.array(list(set(candidate_idxs) - visited))
-            if len(candidate_idxs) == 0:
-                continue
-            sub_coords = coords_arr[candidate_idxs]
-            dists = np.sqrt(((sub_coords - coords_arr[i]) ** 2).sum(axis=1))
-            neighbors_local = np.where(dists < RADIUS_DEG)[0]
-            if len(neighbors_local) >= 1:
-                neighbor_idxs = candidate_idxs[neighbors_local]
-                hubs.append({
-                    "lat": float(np.average(coords_arr[neighbor_idxs, 0], weights=weights_arr[neighbor_idxs])),
-                    "lon": float(np.average(coords_arr[neighbor_idxs, 1], weights=weights_arr[neighbor_idxs])),
-                    "weight": float(np.sum(weights_arr[neighbor_idxs])),
-                    "count": int(len(neighbor_idxs)),
-                })
-                visited.update(neighbor_idxs.tolist())
+    # Orange Predictive Refuges: grid-scanned for pockets with high inferred habitat suitability
+    # (ESI proxy from nearby reports) but near-zero direct sightings — matches Matt Larson's KY case,
+    # where the true habitat may be the *quiet* pocket surrounded by report activity, not just "far from everything."
+    # HONEST LIMITATION: we don't yet have real per-point terrain/hydrology data (that's a data-farming task),
+    # so the ESI proxy here is inverse-distance-weighted from nearby *known* reports' esi_score, not a true
+    # independent terrain calculation. Popups say so explicitly.
+    predictive_refuges = []
+    REPORT_GAP_DEG = st.session_state.param_report_gap_mi / 69.0
+    ESI_PROXY_RADIUS_DEG = 0.6  # ~41 miles — how far we'll look for nearby reports to infer local habitat quality
+    ESI_THRESHOLD = st.session_state.param_esi_threshold
+    MIN_REFUGE_SEPARATION_DEG = 0.15  # ~10 miles apart, so we don't cluster near-duplicate refuge circles
 
-        REPORT_GAP_DEG = report_gap_mi / 69.0
-        ESI_PROXY_RADIUS_DEG = 0.6
-        MIN_REFUGE_SEPARATION_DEG = 0.15
-        GRID_STEP_DEG = 0.3
+    if len(combined_evidence_points) >= 3:
+        esi_arr = np.array([pt["esi"] for pt in combined_evidence_points])
+        min_lat_g, max_lat_g = coords_arr[:, 0].min(), coords_arr[:, 0].max()
+        min_lon_g, max_lon_g = coords_arr[:, 1].min(), coords_arr[:, 1].max()
+        buffer_deg = 0.15
+        grid_n = 16
+        lat_grid = np.linspace(min_lat_g - buffer_deg, max_lat_g + buffer_deg, grid_n)
+        lon_grid = np.linspace(min_lon_g - buffer_deg, max_lon_g + buffer_deg, grid_n)
 
-        if len(evidence_points) >= 3:
-            min_lat_g, max_lat_g = coords_arr[:, 0].min(), coords_arr[:, 0].max()
-            min_lon_g, max_lon_g = coords_arr[:, 1].min(), coords_arr[:, 1].max()
-            lat_grid = np.arange(min_lat_g - 0.15, max_lat_g + 0.15, GRID_STEP_DEG)
-            lon_grid = np.arange(min_lon_g - 0.15, max_lon_g + 0.15, GRID_STEP_DEG)
+        candidates = []
+        for g_lat in lat_grid:
+            for g_lon in lon_grid:
+                if filter_urban(g_lat, g_lon):
+                    continue
+                dists_deg = np.sqrt((coords_arr[:, 0] - g_lat) ** 2 + (coords_arr[:, 1] - g_lon) ** 2)
+                nearest_report_deg = float(np.min(dists_deg))
+                if nearest_report_deg < REPORT_GAP_DEG:
+                    continue  # too close to an actual report — not a "quiet pocket"
 
-            candidates = []
-            for g_lat in lat_grid:
-                for g_lon in lon_grid:
-                    if filter_urban(g_lat, g_lon):
-                        continue
-                    dists_deg = np.sqrt((coords_arr[:, 0] - g_lat) ** 2 + (coords_arr[:, 1] - g_lon) ** 2)
-                    nearest_report_deg = float(np.min(dists_deg))
-                    if nearest_report_deg < REPORT_GAP_DEG:
-                        continue
-                    in_radius = dists_deg <= ESI_PROXY_RADIUS_DEG
-                    if not np.any(in_radius):
-                        continue
-                    idw_weights = 1.0 / (dists_deg[in_radius] + 0.02) ** 2
-                    esi_proxy = float(np.sum(idw_weights * esi_arr[in_radius]) / np.sum(idw_weights))
-                    if esi_proxy >= esi_threshold:
-                        candidates.append({"lat": float(g_lat), "lon": float(g_lon), "esi_proxy": esi_proxy, "gap_miles": nearest_report_deg * 69.0})
+                in_radius = dists_deg <= ESI_PROXY_RADIUS_DEG
+                if not np.any(in_radius):
+                    continue  # no nearby data to infer habitat quality from at all
 
-            candidates.sort(key=lambda c: c["esi_proxy"], reverse=True)
-            for cand in candidates:
-                too_close = any(
-                    np.sqrt((cand["lat"] - kept["lat"]) ** 2 + (cand["lon"] - kept["lon"]) ** 2) < MIN_REFUGE_SEPARATION_DEG
-                    for kept in refuges
-                )
-                if not too_close:
-                    refuges.append(cand)
-                if len(refuges) >= 150:
-                    break
+                idw_weights = 1.0 / (dists_deg[in_radius] + 0.02) ** 2
+                esi_proxy = float(np.sum(idw_weights * esi_arr[in_radius]) / np.sum(idw_weights))
+                if esi_proxy >= ESI_THRESHOLD:
+                    candidates.append({"lat": g_lat, "lon": g_lon, "esi_proxy": esi_proxy, "gap_miles": nearest_report_deg * 69.0})
 
-        LARSON_MAX_DEG = corridor_max_mi / 69.0
-        if len(hubs) > 1:
-            connected_pairs = set()
-            for i in range(len(hubs)):
-                h1 = hubs[i]
-                dists = [(np.sqrt((h1["lat"] - hubs[j]["lat"]) ** 2 + (h1["lon"] - hubs[j]["lon"]) ** 2), j) for j in range(len(hubs)) if i != j]
-                dists.sort()
-                if dists and dists[0][0] < LARSON_MAX_DEG:
-                    j_near = dists[0][1]
-                    pair_key = tuple(sorted([i, j_near]))
-                    if pair_key not in connected_pairs:
-                        connected_pairs.add(pair_key)
-                        h2 = hubs[j_near]
-                        corridors.append({"h1": h1, "h2": h2})
+        # Keep only the strongest, well-separated candidates (avoid a wall of overlapping circles)
+        candidates.sort(key=lambda c: c["esi_proxy"], reverse=True)
+        for cand in candidates:
+            too_close = any(
+                np.sqrt((cand["lat"] - kept["lat"]) ** 2 + (cand["lon"] - kept["lon"]) ** 2) < MIN_REFUGE_SEPARATION_DEG
+                for kept in predictive_refuges
+            )
+            if not too_close:
+                predictive_refuges.append(cand)
+            if len(predictive_refuges) >= 5:
+                break
 
-        return {"hubs": hubs, "refuges": refuges, "corridors": corridors, "computed_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC")}
+    for ref in predictive_refuges:
+        ref_popup = (f"🪹 Predictive Refuge Zone<br>"
+                     f"<b>ESI proxy:</b> {ref['esi_proxy']:.2f} (from nearby reports — not yet real terrain data)<br>"
+                     f"<b>Nearest report:</b> {ref['gap_miles']:.1f} mi away<br>"
+                     f"<small>High inferred habitat quality, no direct reports here — could mean it's genuinely quiet, or that reports simply aren't reaching outside databases (see the Larson/Kentucky case).</small>")
+        folium.Circle(radius=12000, location=[ref['lat'], ref['lon']], color="#d35400", weight=2, dash_array="8, 8", fill=True, fill_color="#e67e22", fill_opacity=0.18, popup=ref_popup).add_to(m)
 
-    @st.cache_data(ttl=86400, show_spinner=True)
-    def compute_all_sightings_weighted(all_sightings, effort_k):
-        processed = []
-        for s in all_sightings:
-            s = dict(s)
-            s_lat, s_lon = s.get("latitude"), s.get("longitude")
-            if s_lat is None or s_lon is None:
-                continue
-            event_d_str = s.get('event_date', 'N/A')
-            try: ev_month = int(str(event_d_str).split('-')[1])
-            except Exception: ev_month = 6
-            s_dist_road = float(s.get("dist_to_road_miles", 0.4))
-            s_pop_density = float(s.get("pop_density_sq_mi", 45.0))
-            eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
-            has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
-            class_rat = s.get("class_rating", "Class A")
-            weight_dict = calculate_adjusted_evidence_weight(class_rat, has_physical, eff_factor, k=effort_k)
-            sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, True)
-            terrain_input = s["real_terrain_roughness"] if s.get("real_terrain_roughness") is not None else 0.6
-            s["evidence_weight"] = weight_dict["final_weight"]
-            s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, terrain_input, 0.7)
-            processed.append(s)
-        return processed
-
-    if show_hotspots:
-        all_weighted = compute_all_sightings_weighted(tuple(raw_sightings), st.session_state.param_effort_k) if raw_sightings else []
-        national_evidence_points = tuple(
-            (float(s["latitude"]), float(s["longitude"]), float(s.get("evidence_weight", 1.0)), float(s.get("esi_score", 0.5)))
-            for s in all_weighted if not filter_urban(float(s["latitude"]), float(s["longitude"]))
-        )
-        national_zones = compute_national_zones(
-            national_evidence_points,
-            st.session_state.param_hotzone_radius_mi,
-            st.session_state.param_report_gap_mi,
-            st.session_state.param_esi_threshold,
-            st.session_state.param_corridor_max_mi,
-        )
-        DISPLAY_BUFFER_MI = radius_miles + st.session_state.param_hotzone_radius_mi
-        ground_truth_hubs = [h for h in national_zones["hubs"] if haversine_miles(lat, lon, h["lat"], h["lon"]) <= DISPLAY_BUFFER_MI]
-        predictive_refuges = [r for r in national_zones["refuges"] if haversine_miles(lat, lon, r["lat"], r["lon"]) <= DISPLAY_BUFFER_MI]
-        visible_corridors = [c for c in national_zones["corridors"] if haversine_miles(lat, lon, c["h1"]["lat"], c["h1"]["lon"]) <= DISPLAY_BUFFER_MI or haversine_miles(lat, lon, c["h2"]["lat"], c["h2"]["lon"]) <= DISPLAY_BUFFER_MI]
-        zones_computed_at = national_zones["computed_at"]
-
-        for hub in ground_truth_hubs:
-            folium.Circle(radius=8000 + (hub['weight'] * 1500), location=[hub['lat'], hub['lon']], color="#e74c3c", weight=2, dash_array="5, 8", fill=True, fill_color="#e74c3c", fill_opacity=0.15, popup=f"🚨 Hot Zone ({hub['count']} evidence points, Total Weight: {hub['weight']:.1f}x)").add_to(m)
-
-        for ref in predictive_refuges:
-            ref_popup = (f"🪹 Predictive Refuge Zone<br>"
-                         f"<b>ESI proxy:</b> {ref['esi_proxy']:.2f} (from nearby reports — not yet real terrain data)<br>"
-                         f"<b>Nearest report:</b> {ref['gap_miles']:.1f} mi away<br>"
-                         f"<small>High inferred habitat quality, no direct reports here.</small>")
-            folium.Circle(radius=12000, location=[ref['lat'], ref['lon']], color="#d35400", weight=2, dash_array="8, 8", fill=True, fill_color="#e67e22", fill_opacity=0.18, popup=ref_popup).add_to(m)
-
-        larson_corridor_count = len(visible_corridors)
-        for c in visible_corridors:
-            h1, h2 = c["h1"], c["h2"]
-            vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
-            perp = np.array([-vec[1], vec[0]]) / (np.linalg.norm(vec) + 1e-6) * 0.025
-            p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
-            p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
-            p3 = [h2["lat"] - perp[1], h2["lon"] - perp[0]]
-            p4 = [h1["lat"] - perp[1], h1["lon"] - perp[0]]
-            folium.Polygon(locations=[p1, p2, p3, p4], color="#27ae60", weight=1.5, fill=True, fill_color="#27ae60", fill_opacity=0.15, popup="🌲 The Larson Hypothesis: Transit Channel").add_to(m)
-
-except Exception as _zone_error:
-    st.warning(f"⚠️ Zone computation hit an error and was skipped this time (map itself is fine): {_zone_error}")
-    ground_truth_hubs, predictive_refuges = [], []
+    # Green Larson Hypothesis corridors: connect nearby hot zones as likely transit channels
+    # Capped at 20 miles between hubs (per field-calibrated real-world corridor length), straight-line
+    # geometric estimate for now — real terrain-following path-tracing needs land-cover/hydrology data.
+    LARSON_MAX_DEG = st.session_state.param_corridor_max_mi / 69.0
     larson_corridor_count = 0
+    if len(ground_truth_hubs) > 1:
+        connected_pairs = set()
+        for i in range(len(ground_truth_hubs)):
+            h1 = ground_truth_hubs[i]
+            dists = [(np.sqrt((h1["lat"] - ground_truth_hubs[j]["lat"]) ** 2 + (h1["lon"] - ground_truth_hubs[j]["lon"]) ** 2), j) for j in range(len(ground_truth_hubs)) if i != j]
+            dists.sort()
+            if dists and dists[0][0] < LARSON_MAX_DEG:
+                j_near = dists[0][1]
+                pair_key = tuple(sorted([i, j_near]))
+                if pair_key not in connected_pairs:
+                    connected_pairs.add(pair_key)
+                    h2 = ground_truth_hubs[j_near]
+                    vec = np.array([h2["lon"] - h1["lon"], h2["lat"] - h1["lat"]])
+                    perp = np.array([-vec[1], vec[0]]) / (np.linalg.norm(vec) + 1e-6) * 0.025
+                    p1 = [h1["lat"] + perp[1], h1["lon"] + perp[0]]
+                    p2 = [h2["lat"] + perp[1], h2["lon"] + perp[0]]
+                    p3 = [h2["lat"] - perp[1], h2["lon"] - perp[0]]
+                    p4 = [h1["lat"] - perp[1], h1["lon"] - perp[0]]
+                    folium.Polygon(locations=[p1, p2, p3, p4], color="#27ae60", weight=1.5, fill=True, fill_color="#27ae60", fill_opacity=0.15, popup="🌲 The Larson Hypothesis: Transit Channel").add_to(m)
+                    larson_corridor_count += 1
 
 st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
-
-if zones_computed_at:
-    st.caption(f"🕒 National zones last calculated: {zones_computed_at}")
 
 # ==========================================
 # 6. INTEGRATED REGIONAL INTELLIGENCE DRAWER (the 4-tab "local intel" drawer)
@@ -1307,35 +1196,19 @@ with st.expander("🧪 National Zone Consistency Proof (Experimental)", expanded
         coords_arr = np.array([[p[0], p[1]] for p in evidence_points])
         weights_arr = np.array([p[2] for p in evidence_points])
         RADIUS_DEG = hotzone_radius_mi / 69.0
-        cell_size = RADIUS_DEG * 2
-        cell_of = {}
-        for idx, (la, lo) in enumerate(coords_arr):
-            key = (int(la // cell_size), int(lo // cell_size))
-            cell_of.setdefault(key, []).append(idx)
+        dist_matrix = np.sqrt(((coords_arr[:, np.newaxis, :] - coords_arr[np.newaxis, :, :]) ** 2).sum(axis=-1))
         visited = set()
         hubs = []
-        for i in range(len(coords_arr)):
+        for i, pt in enumerate(coords_arr):
             if i in visited: continue
-            la, lo = coords_arr[i]
-            cell_key = (int(la // cell_size), int(lo // cell_size))
-            candidate_idxs = []
-            for d_lat in (-1, 0, 1):
-                for d_lon in (-1, 0, 1):
-                    candidate_idxs.extend(cell_of.get((cell_key[0] + d_lat, cell_key[1] + d_lon), []))
-            candidate_idxs = np.array(list(set(candidate_idxs) - visited))
-            if len(candidate_idxs) == 0:
-                continue
-            sub_coords = coords_arr[candidate_idxs]
-            dists = np.sqrt(((sub_coords - coords_arr[i]) ** 2).sum(axis=1))
-            neighbors_local = np.where(dists < RADIUS_DEG)[0]
-            if len(neighbors_local) >= 1:
-                neighbor_idxs = candidate_idxs[neighbors_local]
+            neighbors = np.where(dist_matrix[i] < RADIUS_DEG)[0]
+            if len(neighbors) >= 1:
                 hubs.append({
-                    "lat": float(np.average(coords_arr[neighbor_idxs, 0], weights=weights_arr[neighbor_idxs])),
-                    "lon": float(np.average(coords_arr[neighbor_idxs, 1], weights=weights_arr[neighbor_idxs])),
-                    "weight": float(np.sum(weights_arr[neighbor_idxs])), "count": int(len(neighbor_idxs)),
+                    "lat": float(np.average(coords_arr[neighbors, 0], weights=weights_arr[neighbors])),
+                    "lon": float(np.average(coords_arr[neighbors, 1], weights=weights_arr[neighbors])),
+                    "weight": float(np.sum(weights_arr[neighbors])), "count": int(len(neighbors)),
                 })
-                visited.update(neighbor_idxs.tolist())
+                visited.update(neighbors)
         return {"hubs": hubs, "computed_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M UTC")}
 
     if st.button("Run the national computation", key="run_national_proof"):
