@@ -153,6 +153,8 @@ def load_john_green_data(path="data/john_green_incidents_clean.csv"):
 
 raw_sightings_john_green = load_john_green_data()
 raw_sightings = raw_sightings_bfro + raw_sightings_john_green
+
+
 raw_lore = load_and_standardize_dataset("data/indigenous_lore.csv")
 raw_news = load_and_standardize_dataset("data/press_archives.csv")
 raw_camps = load_and_standardize_dataset("data/campsites.csv")  # optional - app runs fine if this file doesn't exist yet
@@ -426,6 +428,121 @@ def calculate_environmental_suitability_index(sc_m: float, dist_to_water_miles: 
     esi = (0.35 * sc_m) + (0.25 * water_score) + (0.20 * terrain_roughness_score) + (0.20 * ungulate_biomass_score)
     return round(min(1.0, max(0.0, esi)), 3)
 
+
+# ==========================================
+# DRAWER: TIMING DIAGNOSTIC (Experimental) — placed FIRST, before anything else in the
+# script, on purpose. It was previously placed after the main map's own zone computation,
+# which meant if that computation hung, this tool could never even be reached to diagnose
+# it — Streamlit runs top to bottom, so nothing after a stuck step ever renders. This is
+# now fully self-contained (its own function copies, no dependency on anything defined
+# later) so it works no matter what happens further down the page.
+# ==========================================
+with st.expander("⏱️ Timing Diagnostic (Experimental) — click here FIRST if the map seems stuck", expanded=True):
+    st.caption("Times each real stage separately against your real data. Run this before scrolling down if the map isn't loading.")
+
+    @st.cache_data(ttl=86400, show_spinner=True)
+    def diag_weight_all_sightings(all_sightings, effort_k):
+        processed = []
+        for s in all_sightings:
+            s = dict(s)
+            s_lat, s_lon = s.get("latitude"), s.get("longitude")
+            if s_lat is None or s_lon is None:
+                continue
+            event_d_str = s.get('event_date', 'N/A')
+            try: ev_month = int(str(event_d_str).split('-')[1])
+            except Exception: ev_month = 6
+            s_dist_road = float(s.get("dist_to_road_miles", 0.4))
+            s_pop_density = float(s.get("pop_density_sq_mi", 45.0))
+            eff_factor = calculate_human_effort_factor(s_dist_road, s_pop_density)
+            has_physical = bool(s.get("has_tracks") or s.get("has_hair") or s.get("has_physical_evidence"))
+            class_rat = s.get("class_rating", "Class A")
+            weight_dict = calculate_adjusted_evidence_weight(class_rat, has_physical, eff_factor, k=effort_k)
+            sc_index = calculate_seasonal_cover_index(ev_month, 0.4, 0.5, True)
+            terrain_input = s["real_terrain_roughness"] if s.get("real_terrain_roughness") is not None else 0.6
+            s["evidence_weight"] = weight_dict["final_weight"]
+            s["esi_score"] = calculate_environmental_suitability_index(sc_index, 0.3, terrain_input, 0.7)
+            processed.append(s)
+        return processed
+
+    @st.cache_data(ttl=86400, show_spinner=True)
+    def diag_compute_national_hubs(evidence_points, hotzone_radius_mi):
+        if not evidence_points:
+            return {"hubs": []}
+        coords_arr = np.array([[p[0], p[1]] for p in evidence_points])
+        weights_arr = np.array([p[2] for p in evidence_points])
+        RADIUS_DEG = hotzone_radius_mi / 69.0
+        cell_size = RADIUS_DEG * 2
+        cell_of = {}
+        for idx, (la, lo) in enumerate(coords_arr):
+            key = (int(la // cell_size), int(lo // cell_size))
+            cell_of.setdefault(key, []).append(idx)
+        visited = set()
+        hubs = []
+        for i in range(len(coords_arr)):
+            if i in visited: continue
+            la, lo = coords_arr[i]
+            cell_key = (int(la // cell_size), int(lo // cell_size))
+            candidate_idxs = []
+            for d_lat in (-1, 0, 1):
+                for d_lon in (-1, 0, 1):
+                    candidate_idxs.extend(cell_of.get((cell_key[0] + d_lat, cell_key[1] + d_lon), []))
+            candidate_idxs = np.array(list(set(candidate_idxs) - visited))
+            if len(candidate_idxs) == 0:
+                continue
+            sub_coords = coords_arr[candidate_idxs]
+            dists = np.sqrt(((sub_coords - coords_arr[i]) ** 2).sum(axis=1))
+            neighbors_local = np.where(dists < RADIUS_DEG)[0]
+            if len(neighbors_local) >= 1:
+                neighbor_idxs = candidate_idxs[neighbors_local]
+                hubs.append({"count": int(len(neighbor_idxs))})
+                visited.update(neighbor_idxs.tolist())
+        return {"hubs": hubs}
+
+    if st.button("Run timed diagnostic", key="run_timing_diagnostic"):
+        import time as _time
+        results = []
+        try:
+            t0 = _time.time()
+            raw_tuple = tuple(raw_sightings) if raw_sightings else ()
+            t1 = _time.time()
+            results.append(("Building tuple from raw_sightings", t1 - t0))
+
+            t0 = _time.time()
+            timed_weighted = diag_weight_all_sightings(raw_tuple, 0.5)
+            t1 = _time.time()
+            results.append(("Weighting ALL sightings nationally (first call, real cache miss)", t1 - t0))
+
+            t0 = _time.time()
+            timed_points = tuple(
+                (float(s["latitude"]), float(s["longitude"]), float(s.get("evidence_weight", 1.0)))
+                for s in timed_weighted
+            )
+            t1 = _time.time()
+            results.append(("Building the national evidence-points tuple", t1 - t0))
+
+            t0 = _time.time()
+            timed_result = diag_compute_national_hubs(timed_points, 15.0)
+            t1 = _time.time()
+            results.append(("Clustering into Hot Zones (first call)", t1 - t0))
+
+            t0 = _time.time()
+            timed_weighted_2 = diag_weight_all_sightings(raw_tuple, 0.5)
+            t1 = _time.time()
+            results.append(("Weighting ALL sightings nationally (SECOND call, should hit cache)", t1 - t0))
+
+            st.success("Diagnostic complete — results below.")
+            for label, elapsed in results:
+                if elapsed > 5:
+                    st.error(f"🐢 {label}: **{elapsed:.2f} seconds** — this is the slow one")
+                elif elapsed > 1:
+                    st.warning(f"{label}: {elapsed:.2f} seconds")
+                else:
+                    st.write(f"✅ {label}: {elapsed:.3f} seconds")
+            st.caption(f"Real dataset size: {len(raw_sightings)} sightings, {len(timed_weighted)} weighted, {len(timed_result['hubs'])} hubs found")
+        except Exception as e:
+            st.error(f"Diagnostic itself hit an error (worth knowing too, screenshot this): {e}")
+            import traceback
+            st.code(traceback.format_exc())
 def generate_gpx(target_lat, target_lon, loc_title, sightings, camps, audio, community_logs):
     gpx = ET.Element("gpx", version="1.1", creator="BigfootFieldPlatform", xmlns="http://www.topografix.com/GPX/1/1")
     wpt_target = ET.SubElement(gpx, "wpt", lat=str(target_lat), lon=str(target_lon))
@@ -1383,59 +1500,7 @@ with st.expander("🧪 National Zone Consistency Proof (Experimental)", expanded
         else:
             st.warning("Different results — worth a closer look before this ever touches the live map.")
 
-# ==========================================
-# DRAWER: TIMING DIAGNOSTIC (Experimental) — isolates exactly which stage is slow using
-# REAL production data and REAL timers, instead of guessing from synthetic test data
-# again. Also isolated from the map, same safety pattern as the Consistency Proof drawer.
-# ==========================================
-with st.expander("⏱️ Timing Diagnostic (Experimental)", expanded=False):
-    st.caption("Times each stage separately against your real data, so we know exactly which part is slow instead of guessing.")
 
-    if st.button("Run timed diagnostic", key="run_timing_diagnostic"):
-        import time as _time
-        results = []
-        try:
-            t0 = _time.time()
-            raw_tuple = tuple(raw_sightings) if raw_sightings else ()
-            t1 = _time.time()
-            results.append(("Building tuple from raw_sightings", t1 - t0))
-
-            t0 = _time.time()
-            timed_weighted = proof_weight_all_sightings(raw_tuple, st.session_state.param_effort_k)
-            t1 = _time.time()
-            results.append(("compute_all_sightings_weighted (first call, real cache miss)", t1 - t0))
-
-            t0 = _time.time()
-            timed_points = tuple(
-                (float(s["latitude"]), float(s["longitude"]), float(s.get("evidence_weight", 1.0)))
-                for s in timed_weighted if not filter_urban(float(s["latitude"]), float(s["longitude"]))
-            )
-            t1 = _time.time()
-            results.append(("Building the national evidence-points tuple", t1 - t0))
-
-            t0 = _time.time()
-            timed_result = proof_compute_national_hubs(timed_points, st.session_state.param_hotzone_radius_mi)
-            t1 = _time.time()
-            results.append(("compute_national_hubs (clustering, first call)", t1 - t0))
-
-            t0 = _time.time()
-            timed_weighted_2 = proof_weight_all_sightings(raw_tuple, st.session_state.param_effort_k)
-            t1 = _time.time()
-            results.append(("compute_all_sightings_weighted (SECOND call, should hit cache)", t1 - t0))
-
-            st.success("Diagnostic complete — results below.")
-            for label, elapsed in results:
-                if elapsed > 5:
-                    st.error(f"🐢 {label}: **{elapsed:.2f} seconds** — this is the slow one")
-                elif elapsed > 1:
-                    st.warning(f"{label}: {elapsed:.2f} seconds")
-                else:
-                    st.write(f"✅ {label}: {elapsed:.3f} seconds")
-            st.caption(f"Real dataset size: {len(raw_sightings)} sightings, {len(timed_weighted)} weighted, {len(timed_result['hubs'])} hubs found")
-        except Exception as e:
-            st.error(f"Diagnostic itself hit an error (worth knowing too): {e}")
-
-# ==========================================
 # DRAWER: EVIDENCE PATTERN SCANNER (advanced — collapsed, same "off to the side"
 # placement as the Math & Science Drawer so it doesn't compete for tab space)
 # ==========================================
