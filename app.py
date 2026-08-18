@@ -484,8 +484,26 @@ with st.sidebar:
     st.header("⚙️ Field Controls")
     if not st.secrets.get("MAPBOX_TOKEN", ""):
         st.caption("⚠️ No MAPBOX_TOKEN set in Secrets — area search won't work until this is added. Device GPS still works.")
+
+    with st.expander("📂 Load a Saved Search"):
+        loaded_file = st.file_uploader("Upload a saved search file (.json)", type=["json"], key="load_search_uploader")
+        if loaded_file is not None and st.button("Jump to this saved search"):
+            import json as _json
+            try:
+                saved = _json.loads(loaded_file.read())
+                st.session_state.user_lat = saved["lat"]
+                st.session_state.user_lon = saved["lon"]
+                st.session_state.location_name = saved.get("location_name", "Loaded Search")
+                st.session_state.radius_miles_key = saved.get("radius_miles", 100)
+                for layer_key, layer_val in saved.get("layers", {}).items():
+                    st.session_state[layer_key] = layer_val
+                st.success(f"Loaded: {saved.get('location_name', 'saved search')}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Couldn't read that file: {e}")
+
     loc_search = st.text_input("📍 Target Search Area", value=loc_name)
-    radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250, 500], index=2)
+    radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250, 500], index=2, key="radius_miles_key")
     deg_delta = radius_miles / 69.0
 
     col_s1, col_s2 = st.columns(2)
@@ -507,13 +525,35 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🗺️ Active Map Layers")
-    show_bfro = st.checkbox("1. 👣 Sightings (Dual Footprints)", value=True)
-    show_lore = st.checkbox("2. 🪶 Native American Lore Net", value=True)
-    show_news = st.checkbox("3. 📰 Press Archives Net", value=True)
-    show_hotspots = st.checkbox("4. 🚨 Hot Zones, Refuges & The Larson Hypothesis", value=True)
-    show_audio = st.checkbox("5. 🔊 Infrasound / Acoustic Masking", value=True)
-    show_user_logs = st.checkbox("6. ⚠️ Community Field Logs", value=True)
-    show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True)
+    show_bfro = st.checkbox("1. 👣 Sightings (Dual Footprints)", value=True, key="layer_bfro")
+    show_lore = st.checkbox("2. 🪶 Native American Lore Net", value=True, key="layer_lore")
+    show_news = st.checkbox("3. 📰 Press Archives Net", value=True, key="layer_news")
+    show_hotspots = st.checkbox("4. 🚨 Hot Zones, Refuges & The Larson Hypothesis", value=True, key="layer_hotspots")
+    show_audio = st.checkbox("5. 🔊 Infrasound / Acoustic Masking", value=True, key="layer_audio")
+    show_user_logs = st.checkbox("6. ⚠️ Community Field Logs", value=True, key="layer_user_logs")
+    show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True, key="layer_camps")
+
+    st.markdown("---")
+    save_search_payload = {
+        "location_name": loc_name,
+        "lat": lat,
+        "lon": lon,
+        "radius_miles": radius_miles,
+        "layers": {
+            "layer_bfro": show_bfro, "layer_lore": show_lore, "layer_news": show_news,
+            "layer_hotspots": show_hotspots, "layer_audio": show_audio,
+            "layer_user_logs": show_user_logs, "layer_camps": show_camps,
+        },
+    }
+    import json as _json
+    st.download_button(
+        "💾 Save This Search",
+        data=_json.dumps(save_search_payload, indent=2),
+        file_name=f"saved_search_{loc_name.replace(' ', '_').replace(',', '')[:30]}.json",
+        mime="application/json",
+        use_container_width=True,
+        help="Downloads a small file to your device with this exact location, radius, and layer setup. Load it back anytime with 'Load a Saved Search' above.",
+    )
 
 # ==========================================
 # ADJUSTABLE MODEL ASSUMPTIONS — set defaults once; the Math & Science Drawer below the
