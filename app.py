@@ -876,8 +876,14 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
                     title = item.get('title', item.get('headline', 'Archive'))
                     p_date = item.get('pub_date', item.get('event_date', 'Historical'))
                     text = item.get('full_text_transcript', item.get('summary', ''))
+                    ref = item.get('article_url')
                     st.write(f"**{title} ({p_date})**")
                     st.caption(text[:150] + "..." if len(text) > 150 else text)
+                    if len(text) > 150:
+                        with st.expander("Read full article"):
+                            st.write(text)
+                            if ref:
+                                st.markdown(f"[Source]({ref})")
             else:
                 st.info(f"No press accounts indexed for {active_state}.")
         with c_season:
@@ -1419,4 +1425,3 @@ with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Withi
 with st.expander("📡 Offline Field Export & GPX Package", expanded=False):
     gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
     st.download_button(label="📥 Download Active Area GPX Package", data=gpx_data, file_name="bigfoot_field_zone.gpx", mime="application/gpx+xml")
-        
