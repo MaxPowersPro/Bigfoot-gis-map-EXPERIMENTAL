@@ -255,12 +255,14 @@ INFRASOUND_TYPES = {
 
 def classify_infrasound_type(event_type_str):
     s = str(event_type_str).lower()
-    if any(k in s for k in ["waterfall", "falls", "rapid", "hydro", "niagara", "snoqualmie"]):
+    # Check manmade FIRST -- "hydroelectric dam" must never fall through to the waterfall
+    # check via a loose keyword match. Found via testing a real, diverse dataset.
+    if any(k in s for k in ["dam", "mine", "quarry", "blast"]):
+        return "manmade"
+    if any(k in s for k in ["waterfall", "falls", "rapid", "hydrological", "niagara"]):
         return "waterfall"
     if any(k in s for k in ["wind", "pass", "ridge", "saddle", "gap", "aeolian"]):
         return "wind"
-    if any(k in s for k in ["dam", "mine", "quarry", "blast"]):
-        return "manmade"
     if any(k in s for k in ["biotic", "biological", "animal", "vocal", "call"]):
         return "biological"
     return None
@@ -1367,8 +1369,11 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
                     st.markdown(f"**The phenomenon:** {claimed}")
                 st.error(f"**The science:** {item.get('why_its_wrong', '')}")
                 field_test = item.get('field_test', '')
-                if field_test and str(field_test) != "nan" and "None applicable" not in str(field_test) and "Not applicable" not in str(field_test):
-                    st.success(f"**🧪 Field test:** {field_test}")
+                if field_test and str(field_test) != "nan":
+                    if "None applicable" in str(field_test) or "Not applicable" in str(field_test):
+                        st.caption(f"🧪 **Field test:** {field_test}")
+                    else:
+                        st.success(f"**🧪 Field test:** {field_test}")
                 ref = item.get('reference_url')
                 if ref and str(ref) != "nan":
                     st.markdown(f"[Source]({ref})")
