@@ -152,6 +152,21 @@ if "user_state" not in st.session_state:
 if "user_county" not in st.session_state:
     st.session_state.user_county = "Barnstable County"
 
+# --- FIX: apply any loaded saved-search BEFORE any widget with a matching key is drawn ---
+# Streamlit forbids setting st.session_state["some_key"] after a widget using that key
+# has already been instantiated in this run. So instead of setting radius_miles_key (and
+# the layer toggle keys) directly inside the sidebar button code further down, that button
+# now just stashes the loaded search here in "pending_saved_search". This block runs first,
+# before the radius dropdown or any layer checkbox is drawn, and applies it safely.
+if "pending_saved_search" in st.session_state:
+    _pending = st.session_state.pop("pending_saved_search")
+    st.session_state.user_lat = _pending["lat"]
+    st.session_state.user_lon = _pending["lon"]
+    st.session_state.location_name = _pending.get("location_name", "Loaded Search")
+    st.session_state.radius_miles_key = _pending.get("radius_miles", 100)
+    for _layer_key, _layer_val in _pending.get("layers", {}).items():
+        st.session_state[_layer_key] = _layer_val
+
 lat = float(st.session_state.user_lat)
 lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
@@ -416,12 +431,10 @@ with st.sidebar:
         if loaded_file is not None and st.button("Jump to this saved search", use_container_width=True):
             try:
                 saved = _json.loads(loaded_file.read())
-                st.session_state.user_lat = saved["lat"]
-                st.session_state.user_lon = saved["lon"]
-                st.session_state.location_name = saved.get("location_name", "Loaded Search")
-                st.session_state.radius_miles_key = saved.get("radius_miles", 100)
-                for layer_key, layer_val in saved.get("layers", {}).items():
-                    st.session_state[layer_key] = layer_val
+                # FIX: don't set radius_miles_key / layer keys directly here -- the widgets
+                # using those keys are already drawn by the time this runs. Stash it instead;
+                # it gets applied safely at the top of the script on the rerun below.
+                st.session_state.pending_saved_search = saved
                 st.success(f"Loaded: {saved.get('location_name', 'saved search')}")
                 st.rerun()
             except Exception as e:
