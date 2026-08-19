@@ -1364,8 +1364,11 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
             with st.expander("Full story"):
                 claimed = item.get('what_gets_claimed', '')
                 if claimed and "N/A" not in str(claimed):
-                    st.markdown(f"**What gets claimed:** {claimed}")
-                st.error(f"**Why it's wrong:** {item.get('why_its_wrong', '')}")
+                    st.markdown(f"**The phenomenon:** {claimed}")
+                st.error(f"**The science:** {item.get('why_its_wrong', '')}")
+                field_test = item.get('field_test', '')
+                if field_test and str(field_test) != "nan" and "None applicable" not in str(field_test) and "Not applicable" not in str(field_test):
+                    st.success(f"**🧪 Field test:** {field_test}")
                 ref = item.get('reference_url')
                 if ref and str(ref) != "nan":
                     st.markdown(f"[Source]({ref})")
