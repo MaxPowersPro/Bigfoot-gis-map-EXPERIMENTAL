@@ -893,7 +893,7 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
         st.caption(f"Site-specific — {loc_name} only. For general infrasound physics covering all source types, see the Research Library below.")
 
         if not audio_data:
-            st.info("No known infrasound sources currently logged within this sector's radius.")
+            st.info("No non-biological infrasound sources logged in this sector.")
         else:
             for a in audio_data:
                 itype = a.get("infrasound_type")
