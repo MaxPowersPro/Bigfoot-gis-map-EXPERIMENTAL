@@ -1183,7 +1183,7 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
     st.caption("Nationwide ethnographic archives, historical media scans, comparative primate biology, and behavioral search toolsets.")
     lib_choice = st.radio(
         "Select Vault Section:",
-        ["🪶 Indigenous Ethnographic Lore", "📰 Historical Press Archives", "🐒 Comparative Primate Biology & Morphology", "🔊 Infrasound Physics", "👣📜 Sightings & Historical Accounts", "🔬 Researcher Archives"],
+        ["🪶 Indigenous Ethnographic Lore", "📰 Historical Press Archives", "🐒 Comparative Primate Biology & Morphology", "🔊 Infrasound Physics", "👣📜 Sightings & Historical Accounts", "🔬 Researcher Archives", "🔬📋 Field Science"],
         horizontal=True
     )
     st.markdown("---")
@@ -1417,20 +1417,35 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
             st.info("Researcher archives file not found or empty.")
         else:
             for item in raw_researcher_archives:
-                st.markdown(f"### {item.get('researcher_name', 'Unknown')}")
-                st.write(f"**Credentials:** {item.get('credentials', '')}")
-                st.write(f"**Stance:** {item.get('stance', '')}")
-                st.write(f"**Key publications:** {item.get('key_publications', '')}")
-                st.write(f"**Where their materials actually live:** {item.get('archive_location', '')}")
-                st.write(f"**Access:** {item.get('archive_access', '')}")
-                st.caption(f"_Verification: {item.get('verification_status', '')}_")
-                ref = item.get('reference_url')
-                if ref and str(ref) != "nan":
-                    st.markdown(f"[Source]({ref})")
-                if "Krantz" in str(item.get('researcher_name', '')):
-                    st.markdown("**The real finding aid, extracted and readable right here — no download, no embedding tricks that break:**")
-                    with st.expander("📖 Key contents from the real finding aid", expanded=True):
-                        st.markdown("""
+                researcher_name = item.get('researcher_name', 'Unknown')
+                with st.expander(f"👤 {researcher_name}", expanded=False):
+                    st.write(f"**Credentials:** {item.get('credentials', '')}")
+                    st.markdown("#### 📝 Biography")
+                    st.write(item.get('stance', ''))
+
+                    summation = item.get('summation_points', '')
+                    if summation and str(summation) != "nan":
+                        st.markdown("---")
+                        st.markdown("#### 📌 Summation of Key Positions")
+                        st.caption("A distilled point-by-point summary of this researcher's core conclusions — for quick reference alongside the biography above.")
+                        for line in str(summation).split("\n"):
+                            if line.strip():
+                                st.markdown(f"- {line.strip()}")
+
+                    st.markdown("---")
+                    st.write(f"**Key publications:** {item.get('key_publications', '')}")
+                    st.write(f"**Where their materials actually live:** {item.get('archive_location', '')}")
+                    st.write(f"**Access:** {item.get('archive_access', '')}")
+                    st.caption(f"_Verification: {item.get('verification_status', '')}_")
+                    ref = item.get('reference_url')
+                    if ref and str(ref) != "nan":
+                        st.markdown(f"[Source]({ref})")
+
+                    if "Krantz" in str(researcher_name):
+                        st.markdown("---")
+                        st.markdown("**The real finding aid, extracted and readable right here — no download, no embedding tricks that break:**")
+                        with st.expander("📖 Key contents from the real finding aid", expanded=False):
+                            st.markdown("""
 **Collection:** Grover Sanders Krantz papers, NAA.2003-21, National Anthropological Archives, Smithsonian Institution
 **Dates:** 1904-2001 (bulk 1955-2001) — 7.38 linear feet, 14 manuscript boxes, 47 floppy disks, 9 audio cassettes
 
@@ -1452,10 +1467,67 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
 - *Bigfoot Sasquatch Evidence* (1999)
 
 **Note worth knowing before requesting anything:** some materials in the collection are written in "noospel," a phonetic spelling system Krantz invented himself — not everything is straightforwardly readable even once accessed. Access to the physical papers requires an appointment with the National Anthropological Archives; the finding aid itself (what you're reading here) is public domain (CC0).
-                        """)
-                    st.caption("Want the actual full PDF instead of this summary? It opens as a plain, ordinary link — no embedding, no loop.")
-                    st.markdown(f"[📄 Open the real finding aid PDF]({KRANTZ_PDF_URL})")
-                st.markdown("---")
+                            """)
+                        st.caption("Want the actual full PDF instead of this summary? It opens as a plain, ordinary link — no embedding, no loop.")
+                        st.markdown(f"[📄 Open the real finding aid PDF]({KRANTZ_PDF_URL})")
+
+            st.markdown("---")
+            st.markdown("### 🤝 Convergence & Divergence Across These Four Researchers")
+            st.caption("Four people, four completely different backgrounds — a physical anthropologist, a wildlife biologist, a field investigator, and a journalist — who spent decades on this independently. Where they land in the same place matters; where they don't is just as informative.")
+
+            st.markdown("""
+**Where they converge, almost word for word:**
+
+All four treat this as a biological question, full stop — not one of them entertains a paranormal, spiritual, or extra-dimensional framing anywhere in their published work. That's not a small thing across four independent careers spanning the 1960s through the 2010s.
+
+Krantz and Bindernagel independently make almost the identical argument about the missing-bones objection: finding the remains of *any* large, low-density wild mammal — a bear, a cougar, a wolf — is already genuinely rare in the field, so a Sasquatch skeleton's absence isn't the smoking gun skeptics treat it as. Two scientists, different specialties, same argument, arrived at separately.
+
+Krantz and Dahinden go a step further and converge on something stricter: neither one believed eyewitness testimony, however abundant, would ever be enough. Both explicitly named a type specimen — an actual body, bone, or tissue sample — as the only thing that would satisfy mainstream science. Krantz spent nights driving back roads with a rifle for exactly this reason; Dahinden spent decades trying to get the Patterson-Gimlin film in front of anyone who could authenticate it as the next best thing.
+
+Green and Dahinden converge on method more than conclusion: both were essentially applying an outside professional discipline to the subject — Green's newspaper-editor standard of signed affidavits and corroborated timelines, Dahinden's insistence on hard physical proof over stories — rather than accepting testimony on its own terms the way a purely enthusiast-led search might.
+
+**Where they genuinely diverge:**
+
+Bindernagel is the real outlier on the "what would it take" question, and it's worth sitting with rather than smoothing over. Where Krantz and Dahinden treat the *absence* of a type specimen as the field's central problem — something to be solved by finding a body — Bindernagel's later work argues the deeper problem isn't a lack of evidence at all. He believed mainstream science was dismissing the *existing* evidence without ever formally appraising it, creating a closed loop: evidence gets ignored because the subject is dismissed as a hoax, and it stays dismissed as a hoax because the evidence was never formally examined. That's a genuinely different diagnosis of what's actually broken — Krantz and Dahinden say "the data isn't there yet," Bindernagel says "the data is being refused a fair hearing."
+
+**A pattern worth naming directly, since it touches all four:**
+
+There's a real, well-documented dynamic in how experts evaluate ambiguous evidence: an anomaly handed to a specialist cold — "what is this?" — tends to get their genuine best analysis. The same anomaly handed over with the question already framed as "is this Bigfoot?" tends to get a defensive, socially-cautious answer instead, regardless of the specialist's actual expertise. Krantz felt this personally — his own tenure and academic standing took real, lasting damage the moment his name became "the Bigfoot professor," independent of how rigorous his underlying dermal-ridge work actually was. Bindernagel's "scientific taboo" argument is, in a real sense, this exact same dynamic described from the other side of the microscope. If the field's next real breakthrough comes from a specialist recognizing something unusual, it will very likely be because the sample reached them *before* the label did, not because of it.
+            """)
+
+    elif "Field Science" in lib_choice:
+        st.subheader("🔬📋 Field Science & Evidence Standards")
+        st.caption("How to document something well enough that a real specialist takes a second look — and a real example of what happens when that's tried properly.")
+
+        st.markdown("""
+### 📸 Documenting Evidence So It Holds Up
+
+The gap between "interesting field find" and "something a specialist will actually examine" usually comes down to basic documentation discipline, borrowed straight from standard wildlife biology and forensic field practice:
+
+- **Include a real scale reference in every photo** — a ruler, a known object, even a boot for size comparison. A measurement claimed in a caption is worth far less than one visible in the frame.
+- **Multiple angles, not one hero shot** — straight-on, oblique, and raking light (low sun angle) reveal depth and pressure-ridge detail that a single overhead photo flattens out.
+- **Record exact GPS coordinates**, not a general area description. This app's own field log form captures latitude/longitude automatically for exactly this reason.
+- **Document before you touch anything.** Handling a track or a hair sample before it's photographed and measured can destroy the fine detail (dermal ridges, weight-distribution patterns) that actually matters for analysis — and can introduce contaminating DNA onto a sample, which matters enormously for the genetic case study below.
+- **Note the conditions**, not just the find: substrate type (mud, sand, snow), recent weather, and time since the substrate was last disturbed. Temperature and moisture change how fast a track degrades, which affects how it should be interpreted.
+- **Separate what you observed from what you concluded.** This is precisely the "Hard Physical Facts" vs. "Observer Conjecture & Narrative" split already built into this app's own Field Log submission form below — it's not a formality, it's the same discipline field biologists and forensic investigators use to keep raw observation from getting contaminated by interpretation.
+
+### 🧬 A Real Case Study: What Happens When This Is Done Right
+
+In 2012, Oxford geneticist Bryan Sykes and the Lausanne Museum of Zoology put out an open, worldwide call: send in any hair sample you believe came from a Yeti, Bigfoot, Almasty, or Orang Pendek, and it will be tested blind, using the same standard mitochondrial DNA methods used in any ordinary wildlife genetics study. No mysticism, no leading questions — just standard 12S RNA sequencing after rigorous decontamination, published in a real peer-reviewed journal regardless of the result.
+
+37 samples came in. 30 yielded enough DNA to sequence. All of them matched known species — mostly bears, along with a few domestic animals. Two samples, both from the Himalayas (one from Ladakh, India, one from Bhutan), came back with their closest genetic match to an ancient Pleistocene polar bear — not a modern one, and not a species known to currently live there, which raised real questions about an unrecognized bear lineage or hybrid. It's worth being honest that this specific finding was later disputed: other researchers (Edwards & Barnett, 2015) argued the result was more likely degraded DNA from an ordinary modern brown bear, misread as an ancient polar bear signature — a genuine, unresolved scientific disagreement, not a settled fact either way.
+
+The result wasn't proof of anything cryptid. But the methodology is exactly the point Bindernagel's "scientific taboo" argument and the framing-effect discussion above are both getting at: every sample was tested on its own physical merits, by real specialists, with no requirement to first accept or reject what it was being submitted *as*. That's the model — real science published in *Proceedings of the Royal Society B*, citable, checkable, and just as willing to say "this is a bear" as it would have been to say something else.
+
+*Source: Sykes, Mullis, Hagenmuller, Melton & Sartori, "Genetic analysis of hair samples attributed to yeti, bigfoot and other anomalous primates," Proc. R. Soc. B 281 (2014): 20140161.*
+
+### 🔗 Real External Tools Worth Using in the Field
+
+- **[iNaturalist](https://www.inaturalist.org/)** — a real, live citizen-science identification platform. Genuinely useful for ruling out mundane misidentification (an unusual track, an odd call) before assuming something's unexplained — the same "check the boring explanation first" discipline every researcher in this archive practiced.
+- **[NMSU Extension: Identifying and Preserving Wildlife Tracks](https://pubs.nmsu.edu/_circulars/CR561/)** — a real university extension field guide covering track measurement, common misidentifications, and preservation technique.
+- **Macaulay Library (Cornell Lab) and Xeno-Canto** — already linked in this app's Bioacoustics tab above — real recorded-call databases for ruling out the local species most often mistaken for Sasquatch vocalizations.
+        """)
+
 
 with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pseudoscience", expanded=False):
     st.caption("This is exactly why science stays skeptical of Bigfoot research — and exactly what a serious research tool needs to be honest about. Acknowledged and explained here, never endorsed.")
