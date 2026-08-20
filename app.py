@@ -1217,13 +1217,13 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
             nature = item.get('entity_nature', '')
             status = item.get('verification_status', '')
             st.markdown(f"### 🪶 {tribe} — *{entity}*")
-            if nature:
+            if nature and str(nature) != "nan":
                 st.caption(f"**Nature:** {nature}")
             st.caption(f"> {narrative}")
-            if status:
+            if status and str(status) != "nan":
                 st.caption(f"_Status: {status}_")
             ref = item.get('reference_url')
-            if ref:
+            if ref and str(ref) != "nan":
                 st.markdown(f"[Source]({ref})")
             st.markdown("---")
 
