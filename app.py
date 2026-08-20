@@ -444,6 +444,7 @@ with st.sidebar:
     with st.expander("💾 Saved Searches"):
         st.caption("Save this exact location, radius, and layer setup to a file on your device — or load one back.")
         import json as _json
+        import re as _re
         current_layers = {
             "layer_bfro": st.session_state.get("layer_bfro", True),
             "layer_lore": st.session_state.get("layer_lore", True),
@@ -454,15 +455,30 @@ with st.sidebar:
             "layer_camps": st.session_state.get("layer_camps", True),
         }
         save_search_payload = {"location_name": loc_name, "lat": lat, "lon": lon, "radius_miles": radius_miles, "layers": current_layers}
+        # Strip anything that isn't a letter, number, underscore, or dash --
+        # parentheses/commas/other punctuation in a location name (e.g. "Default
+        # Target Zone (Cape Cod...") were leaking into the saved filename, which
+        # is the kind of thing that can make a file behave oddly on some
+        # systems. This guarantees a clean, safe filename every time.
+        _safe_name = _re.sub(r'[^A-Za-z0-9_-]+', '_', loc_name)[:30].strip('_')
         st.download_button(
             "Save This Search",
             data=_json.dumps(save_search_payload, indent=2),
-            file_name=f"saved_search_{loc_name.replace(' ', '_').replace(',', '')[:30]}.json",
+            file_name=f"saved_search_{_safe_name}.json",
             mime="application/json",
             use_container_width=True,
         )
         st.markdown("---")
-        loaded_file = st.file_uploader("Load a saved search file (.json)", type=["json"], key="load_search_uploader")
+        # Widget-reset pattern: give the file_uploader a key that changes every
+        # time a search is successfully loaded. Streamlit file_uploaders can
+        # otherwise hold onto the previously-loaded file across reruns, which
+        # is the most common cause of a saved search only appearing after a
+        # full manual page reload. Forcing a brand-new widget each time avoids
+        # that stale state entirely.
+        if "search_uploader_version" not in st.session_state:
+            st.session_state.search_uploader_version = 0
+        uploader_key = f"load_search_uploader_{st.session_state.search_uploader_version}"
+        loaded_file = st.file_uploader("Load a saved search file (.json)", type=["json"], key=uploader_key)
         if loaded_file is not None and st.button("Jump to this saved search", use_container_width=True):
             with st.spinner("Loading saved search..."):
                 try:
@@ -473,6 +489,7 @@ with st.sidebar:
                     st.session_state.radius_miles_key = saved.get("radius_miles", 100)
                     for layer_key, layer_val in saved.get("layers", {}).items():
                         st.session_state[layer_key] = layer_val
+                    st.session_state.search_uploader_version += 1
                     st.success(f"Loaded: {saved.get('location_name', 'saved search')}")
                     st.rerun()
                 except Exception as e:
@@ -1446,12 +1463,11 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
     if not all_junk_records:
         st.info("Junk Drawer file not found or empty.")
     else:
+        # This box was previously shown once above all four tabs. It's about
+        # patterns found specifically in written media reports, so it now
+        # only renders inside the Media tab below (see junk_tab2), where it
+        # actually belongs.
         overview_items = [i for i in all_junk_records if i.get("drawer_tab") == "Overview"]
-        if overview_items:
-            st.markdown("### 🚩 How To Spot This Stuff — Real Patterns Found In Our Own Research")
-            for item in overview_items:
-                st.write(f"- **{item.get('item_name', '').replace('Red Flag: ', '')}** — {item.get('nutshell', item.get('why_its_wrong', ''))}")
-            st.markdown("---")
 
         def render_junk_entry(item):
             nutshell = item.get('nutshell')
@@ -1478,6 +1494,11 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
         tab_map = {"Indigenous": junk_tab1, "Media": junk_tab2, "Conspiracy": junk_tab3, "Paranormal Bigfoot": junk_tab4}
         for tab_name, tab_obj in tab_map.items():
             with tab_obj:
+                if tab_name == "Media" and overview_items:
+                    st.markdown("### 🚩 How To Spot This Stuff — Real Patterns Found In Our Own Research")
+                    for item in overview_items:
+                        st.write(f"- **{item.get('item_name', '').replace('Red Flag: ', '')}** — {item.get('nutshell', item.get('why_its_wrong', ''))}")
+                    st.markdown("---")
                 tab_items = [i for i in all_junk_records if i.get("drawer_tab") == tab_name]
                 if not tab_items:
                     st.info("Nothing filed here yet.")
