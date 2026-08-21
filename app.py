@@ -751,8 +751,16 @@ if show_audio and audio_data:
 if show_user_logs and user_logs_data:
     for ulog in user_logs_data:
         has_facts = bool(ulog.get('physical_evidence_notes'))
-        log_popup = f"<b>📝 FIELD LOG</b><br><small>Type: {ulog.get('observation_type')}</small><br><p style='font-size:10px;'>{ulog.get('physical_evidence_notes') or ulog.get('field_narrative', '')}</p>"
-        folium.Marker([ulog["latitude"], ulog["longitude"]], popup=log_popup, icon=folium.Icon(color="green" if has_facts else "orange", icon="clipboard", prefix="fa")).add_to(m)
+        facts_html = f"<p style='font-size:10px; margin:4px 0;'><b>Hard Facts:</b> {ulog.get('physical_evidence_notes')}</p>" if ulog.get('physical_evidence_notes') else ""
+        narrative_html = f"<p style='font-size:10px; margin:4px 0;'><b>Narrative:</b> {ulog.get('field_narrative')}</p>" if ulog.get('field_narrative') else ""
+        log_popup = f"""
+        <div style="font-family:sans-serif; width:240px;">
+        <b>📝 FIELD LOG</b><br><small>Type: {ulog.get('observation_type')}</small>
+        {facts_html}
+        {narrative_html}
+        </div>
+        """
+        folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=280), icon=folium.Icon(color="green" if has_facts else "orange", icon="clipboard", prefix="fa")).add_to(m)
 
 ground_truth_hubs, predictive_refuges = [], []
 combined_evidence_points = [
