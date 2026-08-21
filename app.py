@@ -254,16 +254,8 @@ INFRASOUND_TYPES = {
 }
 
 # --- Range-based biological infrasound sources ---
-# Unlike a dam or waterfall (one fixed point), these are species whose real,
-# documented range covers whole states/provinces. Each entry must clear two
-# bars before being added here: (1) real, documented/peer-reviewed infrasound
-# or near-infrasound production -- no exceptions; (2) a real range source
-# (not a boundary sketched by hand). See the citation on each entry.
 RANGE_BASED_BIOLOGICAL_SPECIES = {
     "American Alligator": {
-        # Range source: USFWS Federal Register, "Endangered and Threatened
-        # Wildlife and Plants; Regulations Pertaining to the American
-        # Alligator" -- lists the real breeding range by state.
         "states": {
             "Texas", "Oklahoma", "Louisiana", "Arkansas", "Mississippi",
             "Alabama", "Georgia", "Florida", "South Carolina", "North Carolina",
@@ -279,10 +271,6 @@ RANGE_BASED_BIOLOGICAL_SPECIES = {
         "citation": "Range: USFWS Federal Register (2021). Frequency: Vliet, Univ. of Florida.",
     },
     "Ruffed Grouse": {
-        # Range source: Ruffed Grouse Society ("present now or recently in
-        # all Canadian provinces and 38 of 49 states"); this is a simplified
-        # state-level version of that real range description, not a precise
-        # per-county boundary.
         "states": {
             "Maine", "New Hampshire", "Vermont", "Massachusetts", "Connecticut",
             "New York", "Pennsylvania", "New Jersey",
@@ -434,6 +422,26 @@ def geocode_mapbox(query):
 
 with st.sidebar:
     st.header("⚙️ Field Controls")
+
+    # --- Researcher identity (lightweight, no password) ---
+    # A plain text label the person types once per visit. Not a real login --
+    # no password, no verification -- just a name attached to their own
+    # submissions so Field Log and Saved Search can tell "mine" from
+    # "everyone else's." Session-only for now (re-typed each visit) rather
+    # than persisted across browser closes, to keep this simple and avoid
+    # adding a browser-cookie dependency until it's clear that's worth it.
+    if "researcher_name" not in st.session_state:
+        st.session_state.researcher_name = ""
+    st.session_state.researcher_name = st.text_input(
+        "🧑‍🔬 Researcher Name / Callsign",
+        value=st.session_state.researcher_name,
+        placeholder="e.g. Max P.",
+        help="Type a name once per visit. It gets attached to anything you save below, so you can find your own Field Log entries and Saved Searches later. Not a password -- just a label."
+    )
+    researcher_name = st.session_state.researcher_name.strip()
+    if not researcher_name:
+        st.caption("⚠️ Enter a name above to save or view your own Field Log entries and Saved Searches.")
+
     if not st.secrets.get("MAPBOX_TOKEN", ""):
         st.caption("⚠️ No MAPBOX_TOKEN set in Secrets — area search won't work until this is added. Device GPS still works.")
 
@@ -442,9 +450,7 @@ with st.sidebar:
     deg_delta = radius_miles / 69.0
 
     with st.expander("💾 Saved Searches"):
-        st.caption("Save this exact location, radius, and layer setup to a file on your device — or load one back.")
-        import json as _json
-        import re as _re
+        st.caption("Save this exact location, radius, and layer setup under your name, or jump back to one you saved before -- no file downloads needed.")
         current_layers = {
             "layer_bfro": st.session_state.get("layer_bfro", True),
             "layer_lore": st.session_state.get("layer_lore", True),
@@ -454,46 +460,61 @@ with st.sidebar:
             "layer_user_logs": st.session_state.get("layer_user_logs", True),
             "layer_camps": st.session_state.get("layer_camps", True),
         }
-        save_search_payload = {"location_name": loc_name, "lat": lat, "lon": lon, "radius_miles": radius_miles, "layers": current_layers}
-        # Strip anything that isn't a letter, number, underscore, or dash --
-        # parentheses/commas/other punctuation in a location name (e.g. "Default
-        # Target Zone (Cape Cod...") were leaking into the saved filename, which
-        # is the kind of thing that can make a file behave oddly on some
-        # systems. This guarantees a clean, safe filename every time.
-        _safe_name = _re.sub(r'[^A-Za-z0-9_-]+', '_', loc_name)[:30].strip('_')
-        st.download_button(
-            "Save This Search",
-            data=_json.dumps(save_search_payload, indent=2),
-            file_name=f"saved_search_{_safe_name}.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-        st.markdown("---")
-        # Widget-reset pattern: give the file_uploader a key that changes every
-        # time a search is successfully loaded. Streamlit file_uploaders can
-        # otherwise hold onto the previously-loaded file across reruns, which
-        # is the most common cause of a saved search only appearing after a
-        # full manual page reload. Forcing a brand-new widget each time avoids
-        # that stale state entirely.
-        if "search_uploader_version" not in st.session_state:
-            st.session_state.search_uploader_version = 0
-        uploader_key = f"load_search_uploader_{st.session_state.search_uploader_version}"
-        loaded_file = st.file_uploader("Load a saved search file (.json)", type=["json"], key=uploader_key)
-        if loaded_file is not None and st.button("Jump to this saved search", use_container_width=True):
-            with st.spinner("Loading saved search..."):
-                try:
-                    saved = _json.loads(loaded_file.read())
-                    st.session_state.user_lat = saved["lat"]
-                    st.session_state.user_lon = saved["lon"]
+
+        if not researcher_name:
+            st.info("Enter a Researcher Name above to save or load searches.")
+        elif not supabase:
+            st.info("Saved Searches need SUPABASE_URL / SUPABASE_KEY set in Secrets.")
+        else:
+            save_label = st.text_input("Label for this search", value=loc_name, key="save_search_label")
+            if st.button("Save This Search", use_container_width=True):
+                with st.spinner("Saving..."):
+                    try:
+                        supabase.table("saved_searches").insert({
+                            "researcher_name": researcher_name,
+                            "label": save_label,
+                            "location_name": loc_name,
+                            "latitude": lat,
+                            "longitude": lon,
+                            "radius_miles": radius_miles,
+                            "layers": current_layers,
+                        }).execute()
+                        st.success(f"Saved: {save_label}")
+                    except Exception as e:
+                        st.error(f"Couldn't save: {e}")
+
+            st.markdown("---")
+            try:
+                my_searches = supabase.table("saved_searches").select("*").eq("researcher_name", researcher_name).execute()
+                my_searches_data = my_searches.data or []
+            except Exception as e:
+                my_searches_data = []
+                st.caption(f"Couldn't load saved searches: {e}")
+
+            if not my_searches_data:
+                st.caption("No saved searches yet under this name.")
+            else:
+                search_labels = {f"{s.get('label', 'Untitled')} ({s.get('id')})": s for s in my_searches_data}
+                chosen_label = st.selectbox("Your saved searches:", list(search_labels.keys()), key="load_search_select")
+                col_j1, col_j2 = st.columns(2)
+                if col_j1.button("Jump to this search", use_container_width=True):
+                    saved = search_labels[chosen_label]
+                    st.session_state.user_lat = saved["latitude"]
+                    st.session_state.user_lon = saved["longitude"]
                     st.session_state.location_name = saved.get("location_name", "Loaded Search")
                     st.session_state.radius_miles_key = saved.get("radius_miles", 100)
-                    for layer_key, layer_val in saved.get("layers", {}).items():
+                    for layer_key, layer_val in (saved.get("layers") or {}).items():
                         st.session_state[layer_key] = layer_val
-                    st.session_state.search_uploader_version += 1
-                    st.success(f"Loaded: {saved.get('location_name', 'saved search')}")
+                    st.success(f"Loaded: {saved.get('label', 'saved search')}")
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Couldn't read that file: {e}")
+                if col_j2.button("🗑️ Delete", use_container_width=True):
+                    saved = search_labels[chosen_label]
+                    try:
+                        supabase.table("saved_searches").delete().eq("id", saved["id"]).execute()
+                        st.success("Deleted.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Couldn't delete: {e}")
 
     col_s1, col_s2 = st.columns(2)
     if col_s1.button("🔎 Search Area", use_container_width=True) and loc_search:
@@ -625,6 +646,16 @@ if supabase:
     try:
         r = supabase.table("investigator_logs").select("*").execute()
         for log in (r.data or []):
+            # Real privacy fix: previously every entry within radius was
+            # shown regardless of the Public/Private choice made at
+            # submission -- the is_public flag was saved but never actually
+            # checked here. Now an entry only shows if it's marked public,
+            # OR if it was submitted by the researcher name currently
+            # entered in the sidebar.
+            is_public = bool(log.get("is_public"))
+            is_mine = bool(researcher_name) and log.get("submitted_by") == researcher_name
+            if not (is_public or is_mine):
+                continue
             if haversine_miles(lat, lon, float(log["latitude"]), float(log["longitude"])) <= radius_miles:
                 user_logs_data.append(log)
     except Exception:
@@ -827,11 +858,6 @@ if show_hotspots and combined_evidence_points:
 st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
 
 # --- Biological infrasound range badge ---
-# Shown only when a vetted range-based species' real range covers the
-# current search state. Placed directly under the map, left-aligned --
-# NOT a true floating overlay on top of the map tiles (that CSS trick is
-# fragile inside a Streamlit-Folium iframe and untested; safer version
-# used here instead).
 if applicable_bio_species:
     bio_items_html = "".join(
         f"<div style='margin-bottom:6px;'><b>{name}</b> ({info['frequency']})<br>"
@@ -1417,8 +1443,8 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
             st.info("Researcher archives file not found or empty.")
         else:
             for item in raw_researcher_archives:
-                researcher_name = item.get('researcher_name', 'Unknown')
-                with st.expander(f"👤 {researcher_name}", expanded=False):
+                researcher_name_row = item.get('researcher_name', 'Unknown')
+                with st.expander(f"👤 {researcher_name_row}", expanded=False):
                     st.write(f"**Credentials:** {item.get('credentials', '')}")
                     st.markdown("#### 📝 Biography")
                     st.write(item.get('stance', ''))
@@ -1441,7 +1467,7 @@ with st.expander("📚 Curated Research Library & Cross-Cultural Pattern Engine"
                     if ref and str(ref) != "nan":
                         st.markdown(f"[Source]({ref})")
 
-                    if "Krantz" in str(researcher_name):
+                    if "Krantz" in str(researcher_name_row):
                         st.markdown("---")
                         st.markdown("**The real finding aid, extracted and readable right here — no download, no embedding tricks that break:**")
                         with st.expander("📖 Key contents from the real finding aid", expanded=False):
@@ -1535,10 +1561,6 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
     if not all_junk_records:
         st.info("Junk Drawer file not found or empty.")
     else:
-        # This box was previously shown once above all four tabs. It's about
-        # patterns found specifically in written media reports, so it now
-        # only renders inside the Media tab below (see junk_tab2), where it
-        # actually belongs.
         overview_items = [i for i in all_junk_records if i.get("drawer_tab") == "Overview"]
 
         def render_junk_entry(item):
@@ -1579,7 +1601,9 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
 
 
 with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)", expanded=False):
-    if not supabase:
+    if not researcher_name:
+        st.info("Enter a Researcher Name in the sidebar before submitting a Field Log entry, so you can find and manage it later.")
+    elif not supabase:
         st.info("Field log submission needs SUPABASE_URL / SUPABASE_KEY set in Secrets to save entries.")
     with st.form("investigator_log_form", clear_on_submit=True):
         visibility = st.radio("Storage Mode:", ["🔒 Private Vault", "🌐 Public Community Layer"], horizontal=True)
@@ -1589,13 +1613,16 @@ with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)
         ethics_agree = st.checkbox("Certify as honest field record.")
         submitted = st.form_submit_button("💾 Save Field Log", use_container_width=True)
         if submitted:
-            if not ethics_agree:
+            if not researcher_name:
+                st.warning("Enter a Researcher Name in the sidebar first.")
+            elif not ethics_agree:
                 st.warning("Please certify this is an honest field record before saving.")
             elif not supabase:
                 st.error("Can't save — Supabase isn't configured (see Secrets).")
             else:
                 try:
                     supabase.table("investigator_logs").insert({
+                        "submitted_by": researcher_name,
                         "is_public": "Public" in visibility,
                         "observation_type": obs_type,
                         "event_date": str(datetime.now().date()),
@@ -1609,6 +1636,50 @@ with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error saving log: {e}")
+
+with st.expander("📋 My Entries", expanded=False):
+    st.caption("Field Log entries and Saved Searches tied to your Researcher Name -- view, and delete your own.")
+    if not researcher_name:
+        st.info("Enter a Researcher Name in the sidebar to see your own entries here.")
+    elif not supabase:
+        st.info("This needs SUPABASE_URL / SUPABASE_KEY set in Secrets.")
+    else:
+        my_tab1, my_tab2 = st.tabs(["📝 My Field Logs", "💾 My Saved Searches"])
+        with my_tab1:
+            try:
+                mine = supabase.table("investigator_logs").select("*").eq("submitted_by", researcher_name).execute()
+                mine_data = mine.data or []
+            except Exception as e:
+                mine_data = []
+                st.caption(f"Couldn't load your Field Logs: {e}")
+            if not mine_data:
+                st.caption("No Field Log entries yet under this name.")
+            for entry in mine_data:
+                vis = "🌐 Public" if entry.get("is_public") else "🔒 Private"
+                st.markdown(f"**{entry.get('observation_type', 'Entry')}** — {vis} — {entry.get('event_date', '')}")
+                if entry.get("physical_evidence_notes"):
+                    st.caption(f"Facts: {entry.get('physical_evidence_notes')}")
+                if entry.get("field_narrative"):
+                    st.caption(f"Narrative: {entry.get('field_narrative')}")
+                if st.button("🗑️ Delete this entry", key=f"del_log_{entry.get('id')}"):
+                    try:
+                        supabase.table("investigator_logs").delete().eq("id", entry["id"]).execute()
+                        st.success("Deleted.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Couldn't delete: {e}")
+                st.markdown("---")
+        with my_tab2:
+            try:
+                mine_s = supabase.table("saved_searches").select("*").eq("researcher_name", researcher_name).execute()
+                mine_s_data = mine_s.data or []
+            except Exception as e:
+                mine_s_data = []
+                st.caption(f"Couldn't load your Saved Searches: {e}")
+            if not mine_s_data:
+                st.caption("No Saved Searches yet under this name -- use the sidebar to save one.")
+            for s_entry in mine_s_data:
+                st.write(f"**{s_entry.get('label', 'Untitled')}** — {s_entry.get('location_name', '')} ({s_entry.get('radius_miles', '')} mi)")
 
 with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Within {radius_miles} miles)", expanded=False):
     if camps_data:
