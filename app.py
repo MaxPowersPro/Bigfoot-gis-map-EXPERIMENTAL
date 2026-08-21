@@ -143,14 +143,14 @@ if "user_lat" not in st.session_state or "user_lon" not in st.session_state:
         st.session_state.user_lon = device_loc["coords"]["longitude"]
         st.session_state.location_name = "Detected Local Sector"
     else:
-        st.session_state.user_lat = 41.7000
-        st.session_state.user_lon = -70.3000
-        st.session_state.location_name = "Default Target Zone (Cape Cod / Wampanoag Sector)"
+        st.session_state.user_lat = 41.4384
+        st.session_state.user_lon = -123.7060
+        st.session_state.location_name = "Bluff Creek, CA (Patterson-Gimlin Film Site)"
 
 if "user_state" not in st.session_state:
-    st.session_state.user_state = "Massachusetts"
+    st.session_state.user_state = "California"
 if "user_county" not in st.session_state:
-    st.session_state.user_county = "Barnstable County"
+    st.session_state.user_county = "Humboldt County"
 
 # Apply a pending Saved Search (from the sidebar "Jump to this search"
 # button) here, before any widget below -- like the radius dropdown -- has
@@ -462,6 +462,25 @@ with st.sidebar:
     radius_miles = st.selectbox("Field Radius (Miles)", [25, 50, 100, 250, 500], index=2, key="radius_miles_key")
     deg_delta = radius_miles / 69.0
 
+    col_s1, col_s2 = st.columns(2)
+    if col_s1.button("🔎 Search Area", use_container_width=True) and loc_search:
+        with st.spinner("Searching..."):
+            res = geocode_mapbox(loc_search)
+        if res:
+            st.session_state.user_lat, st.session_state.user_lon, st.session_state.location_name, st.session_state.user_state, st.session_state.user_county = res
+            st.rerun()
+        else:
+            st.warning("Search didn't return a result — check MAPBOX_TOKEN in Secrets, or try Device GPS instead.")
+
+    if col_s2.button("📲 Device GPS", use_container_width=True):
+        with st.spinner("Getting your location..."):
+            loc_data = get_geolocation()
+        if loc_data and "coords" in loc_data:
+            st.session_state.user_lat = loc_data["coords"]["latitude"]
+            st.session_state.user_lon = loc_data["coords"]["longitude"]
+            st.session_state.location_name = "Device GPS"
+            st.rerun()
+
     with st.expander("💾 Saved Searches"):
         st.caption("Save this exact location, radius, and layer setup under your name, or jump back to one you saved before -- no file downloads needed.")
         current_layers = {
@@ -527,25 +546,6 @@ with st.sidebar:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Couldn't delete: {e}")
-
-    col_s1, col_s2 = st.columns(2)
-    if col_s1.button("🔎 Search Area", use_container_width=True) and loc_search:
-        with st.spinner("Searching..."):
-            res = geocode_mapbox(loc_search)
-        if res:
-            st.session_state.user_lat, st.session_state.user_lon, st.session_state.location_name, st.session_state.user_state, st.session_state.user_county = res
-            st.rerun()
-        else:
-            st.warning("Search didn't return a result — check MAPBOX_TOKEN in Secrets, or try Device GPS instead.")
-
-    if col_s2.button("📲 Device GPS", use_container_width=True):
-        with st.spinner("Getting your location..."):
-            loc_data = get_geolocation()
-        if loc_data and "coords" in loc_data:
-            st.session_state.user_lat = loc_data["coords"]["latitude"]
-            st.session_state.user_lon = loc_data["coords"]["longitude"]
-            st.session_state.location_name = "Device GPS"
-            st.rerun()
 
     st.markdown("---")
     st.subheader("🗺️ Active Map Layers")
@@ -1625,18 +1625,15 @@ with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)
         st.info("Enter a Researcher Name in the sidebar before submitting a Field Log entry, so you can find and manage it later.")
     elif not supabase:
         st.info("Field log submission needs SUPABASE_URL / SUPABASE_KEY set in Secrets to save entries.")
-    with st.form("investigator_log_form", clear_on_submit=True):
+    with st.form("investigator_log_form"):
         visibility = st.radio("Storage Mode:", ["🔒 Private Vault", "🌐 Public Community Layer"], horizontal=True)
-        obs_type = st.selectbox("Type", ["Suspect Impression", "Potential Nesting Site", "Vegetation Disturbance", "Acoustic Event", "Visual Observation"])
+        obs_type = st.selectbox("Type", ["Visual Observation", "Suspect Impression", "Potential Nesting Site", "Vegetation Disturbance", "Acoustic Event"])
         physical_notes = st.text_area("Hard Physical Facts", placeholder="Measurements, trackway depth, scale markers...")
         field_narrative = st.text_area("Observer Conjecture & Narrative", placeholder="Hypothesis, perceived behavior...")
-        ethics_agree = st.checkbox("Certify as honest field record.")
         submitted = st.form_submit_button("💾 Save Field Log", use_container_width=True)
         if submitted:
             if not researcher_name:
                 st.warning("Enter a Researcher Name in the sidebar first.")
-            elif not ethics_agree:
-                st.warning("Please certify this is an honest field record before saving.")
             elif not supabase:
                 st.error("Can't save — Supabase isn't configured (see Secrets).")
             else:
@@ -1677,17 +1674,33 @@ with st.expander("📋 My Entries", expanded=False):
             for entry in mine_data:
                 vis = "🌐 Public" if entry.get("is_public") else "🔒 Private"
                 st.markdown(f"**{entry.get('observation_type', 'Entry')}** — {vis} — {entry.get('event_date', '')}")
-                if entry.get("physical_evidence_notes"):
-                    st.caption(f"Facts: {entry.get('physical_evidence_notes')}")
-                if entry.get("field_narrative"):
-                    st.caption(f"Narrative: {entry.get('field_narrative')}")
-                if st.button("🗑️ Delete this entry", key=f"del_log_{entry.get('id')}"):
-                    try:
-                        supabase.table("investigator_logs").delete().eq("id", entry["id"]).execute()
-                        st.success("Deleted.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Couldn't delete: {e}")
+                with st.expander("✏️ View / Edit this entry"):
+                    edit_key = entry.get("id")
+                    new_facts = st.text_area("Hard Physical Facts", value=entry.get("physical_evidence_notes", ""), key=f"edit_facts_{edit_key}")
+                    new_narrative = st.text_area("Observer Conjecture & Narrative", value=entry.get("field_narrative", ""), key=f"edit_narrative_{edit_key}")
+                    new_visibility = st.radio(
+                        "Storage Mode:", ["🔒 Private Vault", "🌐 Public Community Layer"],
+                        index=1 if entry.get("is_public") else 0, horizontal=True, key=f"edit_vis_{edit_key}"
+                    )
+                    col_e1, col_e2 = st.columns(2)
+                    if col_e1.button("💾 Save changes", key=f"save_log_{edit_key}", use_container_width=True):
+                        try:
+                            supabase.table("investigator_logs").update({
+                                "physical_evidence_notes": new_facts,
+                                "field_narrative": new_narrative,
+                                "is_public": "Public" in new_visibility,
+                            }).eq("id", edit_key).execute()
+                            st.success("Updated.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Couldn't update: {e}")
+                    if col_e2.button("🗑️ Delete this entry", key=f"del_log_{edit_key}", use_container_width=True):
+                        try:
+                            supabase.table("investigator_logs").delete().eq("id", edit_key).execute()
+                            st.success("Deleted.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Couldn't delete: {e}")
                 st.markdown("---")
         with my_tab2:
             try:
