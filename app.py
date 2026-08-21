@@ -152,6 +152,19 @@ if "user_state" not in st.session_state:
 if "user_county" not in st.session_state:
     st.session_state.user_county = "Barnstable County"
 
+# Apply a pending Saved Search (from the sidebar "Jump to this search"
+# button) here, before any widget below -- like the radius dropdown -- has
+# been drawn yet in this run. Setting a widget's session_state key after
+# that widget already exists is not allowed by Streamlit; this runs first.
+if "pending_saved_search" in st.session_state:
+    _pending = st.session_state.pop("pending_saved_search")
+    st.session_state.user_lat = _pending["latitude"]
+    st.session_state.user_lon = _pending["longitude"]
+    st.session_state.location_name = _pending.get("location_name", "Loaded Search")
+    st.session_state.radius_miles_key = _pending.get("radius_miles", 100)
+    for _layer_key, _layer_val in (_pending.get("layers") or {}).items():
+        st.session_state[_layer_key] = _layer_val
+
 lat = float(st.session_state.user_lat)
 lon = float(st.session_state.user_lon)
 loc_name = str(st.session_state.location_name)
@@ -499,13 +512,12 @@ with st.sidebar:
                 col_j1, col_j2 = st.columns(2)
                 if col_j1.button("Jump to this search", use_container_width=True):
                     saved = search_labels[chosen_label]
-                    st.session_state.user_lat = saved["latitude"]
-                    st.session_state.user_lon = saved["longitude"]
-                    st.session_state.location_name = saved.get("location_name", "Loaded Search")
-                    st.session_state.radius_miles_key = saved.get("radius_miles", 100)
-                    for layer_key, layer_val in (saved.get("layers") or {}).items():
-                        st.session_state[layer_key] = layer_val
-                    st.success(f"Loaded: {saved.get('label', 'saved search')}")
+                    # Fix: can't set radius_miles_key here directly -- the
+                    # radius dropdown using that key is already drawn earlier
+                    # in this same script run. Stash it instead; it's applied
+                    # safely at the very top of the script on the rerun below,
+                    # before any widget with a matching key exists yet.
+                    st.session_state.pending_saved_search = saved
                     st.rerun()
                 if col_j2.button("🗑️ Delete", use_container_width=True):
                     saved = search_labels[chosen_label]
