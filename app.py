@@ -206,6 +206,7 @@ with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", exp
         st.write("""
         * Use the **7 Active Map Layers** in the sidebar to show or hide specific data overlays in real time.
         * Turn layers off to declutter dense search sectors when analyzing high-density sighting clusters.
+        * **📝 Submitting a Field Log:** Enter a Researcher Name in the sidebar first, then use the "Submit Investigator Field Log" drawer near the bottom of the page. Full instructions are inside that drawer.
         """)
     st.markdown("---")
 
@@ -1621,6 +1622,9 @@ with st.expander("🗑️ Junk Drawer — Debunked Claims, Misattributions & Pse
 
 
 with st.expander("📝 Submit Investigator Field Log (Facts vs. Conjecture Mode)", expanded=False):
+    st.caption("""
+    **How this works:** Enter a Researcher Name in the sidebar first -- that's what lets you find and edit your own entries later. Then fill out the form below: put only measured, observed facts in **Hard Physical Facts** (measurements, depth, scale markers), and put your interpretation or hypothesis in **Observer Conjecture & Narrative** -- the app keeps these separate on purpose. Choose **Private Vault** if you want it visible only to you, or **Public Community Layer** if you want it visible to everyone. You can change your mind on that later, or edit/delete the entry entirely, in the **📋 My Entries** drawer further down the page.
+    """)
     if not researcher_name:
         st.info("Enter a Researcher Name in the sidebar before submitting a Field Log entry, so you can find and manage it later.")
     elif not supabase:
@@ -1725,3 +1729,4 @@ with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Withi
 with st.expander("📡 Offline Field Export & GPX Package", expanded=False):
     gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
     st.download_button(label="📥 Download Active Area GPX Package", data=gpx_data, file_name="bigfoot_field_zone.gpx", mime="application/gpx+xml")
+    
