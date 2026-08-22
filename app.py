@@ -307,6 +307,16 @@ RANGE_BASED_BIOLOGICAL_SPECIES = {
     },
 }
 
+# Real, verified "go listen" links for the range-based biological species above.
+# Only add an entry here once a link has actually been checked and confirmed
+# working -- an unverified guess is worse than no link at all. Ruffed Grouse's
+# eBird/Macaulay Library taxon code ("rufgro") is confirmed via Cornell's own
+# eBird and Birds of the World species pages. American Alligator has no
+# confirmed direct link yet -- flagged in the UI rather than guessed.
+BIO_SPECIES_LISTEN_LINKS = {
+    "Ruffed Grouse": "https://search.macaulaylibrary.org/catalog?taxonCode=rufgro",
+}
+
 def classify_infrasound_type(event_type_str):
     s = str(event_type_str).lower()
     if any(k in s for k in ["waterfall", "falls", "rapid", "hydro", "niagara", "snoqualmie"]):
@@ -880,12 +890,19 @@ st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
 
 # --- Biological infrasound range badge ---
 if applicable_bio_species:
-    bio_items_html = "".join(
-        f"<div style='margin-bottom:6px;'><b>{name}</b> ({info['frequency']})<br>"
-        f"<span style='font-size:11px;'>{info['description']}</span><br>"
-        f"<span style='font-size:9px; color:#ccc;'>{info['citation']}</span></div>"
-        for name, info in applicable_bio_species
-    )
+    bio_items_html = ""
+    for name, info in applicable_bio_species:
+        listen_link = BIO_SPECIES_LISTEN_LINKS.get(name)
+        if listen_link:
+            listen_html = f"<a href='{listen_link}' target='_blank' style='font-size:10px; color:#f4d03f; text-decoration:underline;'>🔊 Real recordings (Macaulay Library)</a><br>"
+        else:
+            listen_html = "<span style='font-size:9px; color:#bbb;'>🔊 Verified recording link not yet sourced.</span><br>"
+        bio_items_html += (
+            f"<div style='margin-bottom:6px;'><b>{name}</b> ({info['frequency']})<br>"
+            f"<span style='font-size:11px;'>{info['description']}</span><br>"
+            f"{listen_html}"
+            f"<span style='font-size:9px; color:#ccc;'>{info['citation']}</span></div>"
+        )
     st.markdown(f"""
     <details style="background:#8e44ad; color:white; border-radius:10px; padding:8px 14px; font-size:13px; margin-top:6px; max-width:420px;">
       <summary style="cursor:pointer; outline:none;">🔊 Biological Infrasound Present</summary>
@@ -1001,6 +1018,11 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
                 st.markdown(f"#### 🦎 {name}")
                 st.write(f"**Frequency:** {info['frequency']}")
                 st.write(info["description"])
+                listen_link = BIO_SPECIES_LISTEN_LINKS.get(name)
+                if listen_link:
+                    st.markdown(f"[🔊 Real recordings ({name})]({listen_link})")
+                else:
+                    st.caption("🔊 Verified recording link not yet sourced — flagged for the acoustic-fixes follow-up.")
                 st.caption(f"Source: {info['citation']}")
                 st.markdown("---")
 
@@ -1012,10 +1034,35 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
         * **Canids & Predators:** Eastern Coyote (yip-harmonics), Red/Gray Fox (screams).
         * **Mammals:** White-Tailed Deer (alarm snorts), Black Bear (guttural huffs, upright stance, human-like tracks when hind prints overlap front prints).
         """)
-        macaulay_url = f"https://www.macaulaylibrary.org/catalog?searchField=location&lat={lat}&long={lon}"
+        # Fix: the old link used lat/long query params that Macaulay Library's
+        # real search page does not actually support (it errored for every
+        # location). Macaulay's real, working search format is
+        # search.macaulaylibrary.org/catalog?taxonCode=<code> -- there's no
+        # public "search near this lat/long across all species" endpoint, so
+        # this now points to the real homepage where any of the species above
+        # can be searched by name.
+        macaulay_url = "https://www.macaulaylibrary.org/"
         xenocanto_url = f"https://xeno-canto.org/explore?query=lat:{lat}%20lon:{lon}"
-        st.markdown(f"* [🔊 **Macaulay Library (Cornell Lab)**]({macaulay_url}) — real recordings for this area")
+        st.markdown(f"* [🔊 **Macaulay Library (Cornell Lab)**]({macaulay_url}) — search any of the species above by name")
         st.markdown(f"* [🌐 **Xeno-Canto Geographic Database**]({xenocanto_url}) — community-sourced calls for this area")
+
+        st.markdown("---")
+        st.markdown(f"#### 🦎🐦 Range-Based Infrasound Species ({active_state})")
+        st.caption("These also show up in the Infrasound tab and the purple map badge — included here too, since they're exactly the kind of thing that gets misread as something stranger.")
+        if not applicable_bio_species:
+            st.info(f"No vetted range-based biological infrasound species are documented in {active_state}.")
+        else:
+            for name, info in applicable_bio_species:
+                st.markdown(f"##### 🦎 {name}")
+                st.write(f"**Frequency:** {info['frequency']}")
+                st.write(info["description"])
+                listen_link = BIO_SPECIES_LISTEN_LINKS.get(name)
+                if listen_link:
+                    st.markdown(f"[🔊 Real recordings ({name})]({listen_link})")
+                else:
+                    st.caption("🔊 Verified recording link not yet sourced — flagged for the acoustic-fixes follow-up.")
+                st.caption(f"Source: {info['citation']}")
+                st.markdown("---")
 
     with panel_tab4:
         c_lore, c_media, c_season = st.columns(3)
@@ -1729,4 +1776,3 @@ with st.expander(f"🏕️ Regional Campsites & Backcountry Access Points (Withi
 with st.expander("📡 Offline Field Export & GPX Package", expanded=False):
     gpx_data = generate_gpx(lat, lon, loc_name, sightings_data, camps_data, audio_data, user_logs_data)
     st.download_button(label="📥 Download Active Area GPX Package", data=gpx_data, file_name="bigfoot_field_zone.gpx", mime="application/gpx+xml")
-    
