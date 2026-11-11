@@ -1,0 +1,4 @@
+id,is_public,observation_type,event_date,latitude,longitude,physical_evidence_notes,field_narrative,ethics_agreed,created_at,submitted_by
+31d9ce7f-8ef8-4acc-a395-9015852b670e,false,Visual Observation,2026-08-21,42.300083,-77.88303,Every campsite Is full.,"There can't be bigfoot here, there are too many people.",true,2026-08-21 19:20:21.617196+00,Bigfoothunter
+3c8999db-8a12-493e-91ec-ed30d49f6b98,false,Visual Observation,2026-08-21,42.300083,-77.88303,y,n,true,2026-08-21 19:45:35.285754+00,Bigfoothunter
+4dc54ea3-5152-409c-831b-f5a3184f5bd4,false,Acoustic Event,2026-08-20,28.364587,-82.189095,"I have audio of a mysterious buzz of my right ear. I heard it too. Rob, who was just 20' away, didn't hear it at all. It was captured on audio multiple times. Seems like a humming bird or a dung beetle but I didn't see either in the area all night. Strange. ","Not sure what to think. ",true,2026-08-20 20:20:48.48368+00,
