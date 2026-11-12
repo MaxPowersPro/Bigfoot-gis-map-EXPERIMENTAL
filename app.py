@@ -449,11 +449,28 @@ PARANORMAL_KEYWORDS = [
     "ufo", "mystery light", "orb", "telepath", "mind-speak", "mindspeak", "mind speak",
     "vanished", "disappeared without", "teleport", "portal", "shapeshift", "shape-shift",
     "glowing eyes", "no tracks after", "tracks stopped", "psychic",
+    "shadow figure", "shadow person", "disembodied", "apparition", "interdimensional",
+    "cloaked", "cloak", "shimmering", "predator-like", "invisible", "poltergeist",
+    "time slip", "lost time", "missing time", "sixth sense", "astral",
+]
+
+SENSORY_DREAD_KEYWORDS = [
+    "sense of dread", "overwhelming dread", "feeling of dread", "unexplained dread",
+    "being watched", "feeling watched", "eyes on me", "heavy silence", "forest went quiet",
+    "woods went quiet", "dead silent", "sudden silence", "hair stood up", "hair on my neck",
+    "nausea", "nauseous", "dizzy", "dizziness", "vertigo", "ear pressure", "head pressure",
+    "chest pressure", "vibration", "vibrating", "low hum", "sub-audible", "felt it in my chest",
+    "peripheral shadow", "out of the corner of my eye", "panicked", "overwhelming fear",
+    "paralyzed with fear", "couldn't move", "frozen in fear",
 ]
 
 def scan_paranormal_content(text: str) -> bool:
     low = text.lower()
     return any(kw in low for kw in PARANORMAL_KEYWORDS)
+
+def scan_sensory_dread(text: str) -> list:
+    low = text.lower()
+    return [kw for kw in SENSORY_DREAD_KEYWORDS if kw in low]
 
 def calculate_human_effort_factor(dist_to_road_miles: float, pop_density_sq_mi: float) -> float:
     safe_dist = max(0.01, dist_to_road_miles)
