@@ -54,7 +54,55 @@ def load_bfro_clean_data(path="data/bfro_reports_clean.csv"):
         })
     return records
 
+def load_bfro_renner_data(path="data/bfro_reports_geocoded.csv"):
+    import pandas as pd
+    import os
+    if not os.path.exists(path):
+        return []
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        try:
+            df = pd.read_csv(path, engine="python", on_bad_lines="skip")
+        except Exception:
+            return []
+
+    records = []
+    for _, row in df.iterrows():
+        lat_val = row.get("latitude")
+        lon_val = row.get("longitude")
+        if pd.isna(lat_val) or pd.isna(lon_val):
+            continue
+        raw_num = row.get("number", "")
+        rep_id = str(int(raw_num)) if pd.notna(raw_num) and str(raw_num).replace(".0", "").isdigit() else str(raw_num)
+        title_val = str(row.get("title", "")) if pd.notna(row.get("title")) else f"BFRO Report #{rep_id}"
+        observed_val = str(row.get("observed", "")) if pd.notna(row.get("observed")) else ""
+        date_val = str(row.get("date", "N/A")) if pd.notna(row.get("date")) else "N/A"
+        class_val = str(row.get("classification", "Unclassified")) if pd.notna(row.get("classification")) else "Unclassified"
+        county_val = str(row.get("county", "")) if pd.notna(row.get("county")) else ""
+
+        records.append({
+            "id": rep_id,
+            "report_id": rep_id,
+            "title": title_val,
+            "summary": observed_val,
+            "latitude": float(lat_val),
+            "longitude": float(lon_val),
+            "event_date": date_val,
+            "class_rating": class_val,
+            "county": county_val,
+            "source": "BFRO (Geocoded Archive)",
+            "real_terrain_roughness": None,
+        })
+    return records
+
 raw_sightings_bfro = load_bfro_clean_data()
+existing_bfro_ids = {str(r.get("report_id", "")).strip() for r in raw_sightings_bfro if str(r.get("report_id", "")).strip()}
+for r_rec in load_bfro_renner_data():
+    r_id = str(r_rec.get("report_id", "")).strip()
+    if r_id and r_id not in existing_bfro_ids:
+        raw_sightings_bfro.append(r_rec)
+        existing_bfro_ids.add(r_id)
 
 def load_junk_drawer_data(path="data/junk_drawer.csv"):
     import pandas as pd
@@ -223,12 +271,12 @@ with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", exp
     with col_g2:
         st.markdown("#### 🗺️ Master Map Key")
         st.write("""
-        * **👣📜 Footprint Markers:** Blue = standard biological sighting. Purple = report text includes documented high-strangeness language.
+        * **👣📜 Footprint Markers:** Blue = standard biological sighting. Purple = report text includes documented high-strangeness or sensory dread language.
         * **🚨 Red Dotted Rings:** Hot Zones where reports, wildlife density, cover, and water overlap.
         * **🪹 Orange Dotted Rings:** Predictive Refuges — high inferred habitat quality with no direct sightings nearby.
         * **🌲 Green Channels:** Larson transit corridors (≤20 miles) connecting nearby Hot Zones along natural terrain gaps.
         * **🔊 Purple Marker:** Infrasound source (waterfalls, dams, wind gaps). Bold inner ring = felt zone; light outer ring = detectable zone.
-        * **💨 Wind Turbines:** Industrial turbine locations. Inner ring = felt zone (~1.5 mi); outer ring = detectable zone (~6 mi).
+        * **💨 Wind Turbines (Teal Dots):** Industrial turbine stems. Thin inner ring = felt zone (~1.5 mi); dashed outer ring = detectable zone (~6 mi).
         * **🏕️ Green Campgrounds:** Dispersed campsites and backcountry staging points.
         """)
     with col_g3:
@@ -329,7 +377,7 @@ INFRASOUND_TYPES = {
     "wind": {"label": "🌬️ Wind / Mountain Pass", "cause": "High-velocity wind funneling through narrow ridge gaps, saddles, or mountain passes.", "freq_range": "0.5 – 5 Hz", "character": "Continuous, weather- and pressure-system dependent.", "felt_miles": 8, "travel_miles": 55, "effect": "Sits at the low end of the vestibular band — dizziness and disorientation are most likely, especially during active frontal weather passing through the notch."},
     "manmade": {"label": "⚙️ Man-Made (Dam / Mine)", "cause": "Dam spillway turbulence (continuous hum) or mine/quarry blasting (short, high-amplitude pulses).", "freq_range": "0.5 – 15 Hz", "character": "Dams: steady hum. Mines/quarries: sharp, punctuated blast pulses, documented detectable 10+ miles out.", "felt_miles": 8, "travel_miles": 60, "effect": "Mine blasts can produce a sudden felt pressure jolt rather than a gradual sensation; dam hum tends to produce the same dizziness/dread pattern as natural hydrological sources."},
     "biological": {"label": "🦍 Biological", "cause": "Large thoracic resonance structures and specialized laryngeal folds in large-bodied animals producing sub-audible vocal bursts.", "freq_range": "8 – 18 Hz", "character": "Vocal burst, not continuous.", "felt_miles": 3, "travel_miles": 8, "effect": "Overlaps the human alpha-wave / 'being watched' band (7-12 Hz) most directly, but the felt zone is small since source amplitude is far below geological or man-made sources."},
-    "turbine": {"label": "💨 Wind Turbine (Industrial)", "cause": "Blade passage past vertical support towers, generating continuous low-frequency pressure pulses.", "freq_range": "0.5 – 20 Hz", "character": "Periodic pulse at blade-pass frequency (~0.5–2.5 Hz).", "felt_miles": 1.5, "travel_miles": 6.0, "effect": "Vestibular disturbance: lightheadedness, nausea, sensation of ear pressure, and low-level autonomic arousal (hyper-vigilance/restlessness) in sensitive individuals within the felt zone (0.5–1.5 mi)."},
+    "turbine": {"label": "💨 Wind Turbine (Industrial)", "cause": "Blade passage past vertical support towers, generating continuous low-frequency pressure pulses.", "freq_range": "0.5 – 20 Hz", "character": "Periodic pulse at blade-pass frequency (~0.5–2.5 Hz).", "felt_miles": 1.5, "travel_miles": 6.0, "effect": "Vestibular disturbance: lightheadedness, nausea, sensation of ear pressure, and low-level autonomic arousal (hyper-vigilance/restlessness/ghost-frequency overlap) in sensitive individuals within the felt zone (0.5–1.5 mi)."},
 }
 
 RANGE_BASED_BIOLOGICAL_SPECIES = {
@@ -397,6 +445,8 @@ PARANORMAL_KEYWORDS = [
     "ufo", "mystery light", "orb", "telepath", "mind-speak", "mindspeak", "mind speak",
     "vanished", "disappeared without", "teleport", "portal", "shapeshift", "shape-shift",
     "glowing eyes", "no tracks after", "tracks stopped", "psychic",
+    "being watched", "watched me", "sudden dread", "overwhelming dread", "paralyzed with fear",
+    "frozen in fear", "unexplained panic", "shadow figure", "felt a presence", "sense of dread",
 ]
 
 def scan_paranormal_content(text: str) -> bool:
@@ -604,8 +654,6 @@ with st.sidebar:
     show_lore = st.checkbox("2. 🪶 Native American Lore Net", value=True, key="layer_lore")
     show_news = st.checkbox("3. 📰 Press Archives Net", value=True, key="layer_news")
     show_hotspots = st.checkbox("4. 🚨 Hot Zones, Refuges & The Larson Hypothesis", value=True, key="layer_hotspots")
-    
-    # --- Layers 5 and 8 are set to value=True to stay ON by default ---
     show_audio = st.checkbox("5. 🔊 Infrasound / Acoustic Masking", value=True, key="layer_audio")
     show_user_logs = st.checkbox("6. ⚠️ Community Field Logs", value=True, key="layer_user_logs")
     show_camps = st.checkbox("7. 🏕️ Camping & Access Points", value=True, key="layer_camps")
@@ -722,15 +770,47 @@ try:
 except Exception:
     pass
 
+turbines_in_sector = fetch_usgs_wind_turbines(lat, lon, radius_miles) if show_turbines else []
+
+# Cross-reference Sightings & High-Strangeness Reports against ALL Infrasound Felt Zones (including Wind Turbines)
+woo_total_in_sector = 0
+woo_infrasound_overlap = 0
+
 for s in sightings_data:
     s["nearby_infrasound"] = None
+    s_lat, s_lon = float(s["latitude"]), float(s["longitude"])
+
     for a in audio_data:
-        dist = haversine_miles(float(s["latitude"]), float(s["longitude"]), float(a["latitude"]), float(a["longitude"]))
+        dist = haversine_miles(s_lat, s_lon, float(a["latitude"]), float(a["longitude"]))
         if dist <= a.get("felt_radius_miles", 8):
-            itype_label = INFRASOUND_TYPES.get(a.get("infrasound_type"), {}).get("label", "an unclassified infrasound source")
-            s["nearby_infrasound"] = {"label": itype_label, "event_type": a.get("event_type", ""), "dist_miles": dist}
+            itype_key = a.get("infrasound_type")
+            t_meta = INFRASOUND_TYPES.get(itype_key, {})
+            s["nearby_infrasound"] = {
+                "label": t_meta.get("label", "an unclassified infrasound source"),
+                "freq_range": t_meta.get("freq_range", "0.5 – 20 Hz"),
+                "event_type": a.get("event_type", ""),
+                "dist_miles": dist,
+            }
             break
+
+    if not s["nearby_infrasound"] and turbines_in_sector:
+        for t in turbines_in_sector:
+            dist = haversine_miles(s_lat, s_lon, t["latitude"], t["longitude"])
+            if dist <= t["felt_radius_miles"]:
+                t_meta = INFRASOUND_TYPES["turbine"]
+                s["nearby_infrasound"] = {
+                    "label": f"{t_meta['label']} ({t['project_name']})",
+                    "freq_range": t_meta["freq_range"],
+                    "event_type": t["project_name"],
+                    "dist_miles": dist,
+                }
+                break
+
     s["is_anomalous"] = scan_paranormal_content(f"{s.get('title', '')} {s.get('summary', '')}")
+    if s["is_anomalous"]:
+        woo_total_in_sector += 1
+        if s["nearby_infrasound"]:
+            woo_infrasound_overlap += 1
 
 applicable_bio_species = [
     (name, info) for name, info in RANGE_BASED_BIOLOGICAL_SPECIES.items()
@@ -760,18 +840,22 @@ if show_bfro and sightings_data:
         raw_id = str(s.get('report_id', s.get('id', ''))).strip()
         source_label = s.get("source", "BFRO")
         link_html = f'<br><a href="https://www.bfro.net/GDB/show_report.asp?id={raw_id}" target="_blank" style="display:inline-block; margin-top:4px; padding:3px 6px; background:#007bff; color:white; border-radius:3px; text-decoration:none; font-size:10px;">📄 Direct BFRO Report #{raw_id}</a>' if raw_id.isdigit() else ''
-        infrasound_note = ""
-        if s.get("nearby_infrasound"):
-            ni = s["nearby_infrasound"]
-            infrasound_note = f"""<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">🔊 <b>Natural explanation check:</b> within the felt zone of {ni['label']} ({ni['dist_miles']:.1f} mi) — see Local Intel.</div>"""
 
         is_anomalous = s.get("is_anomalous", False)
         pin_color = "#8e44ad" if is_anomalous else "#2b78e4"
         source_icon = "📜" if source_label != "BFRO" else "👣"
 
+        infrasound_note = ""
+        if s.get("nearby_infrasound"):
+            ni = s["nearby_infrasound"]
+            if is_anomalous:
+                infrasound_note = f"""<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">👻/🔊 <b>Infrasound Cross-Reference:</b> sits <b>{ni['dist_miles']:.1f} mi</b> inside the felt zone of {ni['label']} ({ni['freq_range']}, overlapping the 7–19 Hz 'ghost / being-watched' band).</div>"""
+            else:
+                infrasound_note = f"""<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">🔊 <b>Natural explanation check:</b> within the felt zone of {ni['label']} ({ni['dist_miles']:.1f} mi) — see Local Intel.</div>"""
+
         anomalous_note = ""
         if is_anomalous:
-            anomalous_note = """<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">👻 <b>Content flag (conjecture, not fact):</b> report text includes documented high-strangeness language.</div>"""
+            anomalous_note = """<div style="margin-top:4px; padding:4px; background:#f4f0fa; border-left:3px solid #8e44ad; font-size:9px;">👻 <b>Content flag (conjecture, not fact):</b> report text includes documented high-strangeness or sensory dread language.</div>"""
 
         terrain_source = s.get("terrain_data_source", "placeholder (not yet farmed for this report)")
         terrain_icon = "🟢" if "real" in terrain_source else "⚪"
@@ -806,12 +890,11 @@ if show_audio and audio_data:
         a_popup = f"""<b>🔊 {type_label}</b><br><b>{a.get('event_type')}</b><br><small>Felt zone: ~{a.get('felt_radius_miles', 8)} mi | Detectable to: ~{a['prop_radius_miles']} mi</small>{off_str}"""
         if not a.get("is_offscreen"):
             folium.Marker([a["latitude"], a["longitude"]], popup=a_popup, icon=folium.Icon(color="purple", icon="volume-up", prefix="fa")).add_to(m)
-        folium.Circle(radius=travel_m, location=[a["latitude"], a["longitude"]], color="#8e44ad", weight=1, dash_array="4, 6", fill=True, fill_color="#8e44ad", fill_opacity=0.04, popup=f"Detectable footprint (~{a['prop_radius_miles']} mi)").add_to(m)
-        folium.Circle(radius=felt_m, location=[a["latitude"], a["longitude"]], color="#6c3483", weight=2, fill=True, fill_color="#8e44ad", fill_opacity=0.16, popup=f"Felt zone (~{a.get('felt_radius_miles', 8)} mi)").add_to(m)
+        folium.Circle(radius=travel_m, location=[a["latitude"], a["longitude"]], color="#8e44ad", weight=1, dash_array="4, 6", fill=False, popup=f"Detectable footprint (~{a['prop_radius_miles']} mi)").add_to(m)
+        folium.Circle(radius=felt_m, location=[a["latitude"], a["longitude"]], color="#6c3483", weight=1.5, fill=True, fill_color="#8e44ad", fill_opacity=0.04, popup=f"Felt zone (~{a.get('felt_radius_miles', 8)} mi)").add_to(m)
 
-# Layer 8: USGS Wind Turbines Mapping
-if show_turbines:
-    turbines_in_sector = fetch_usgs_wind_turbines(lat, lon, radius_miles)
+# Layer 8: USGS Wind Turbines (Minimalist 3px Dots + Ultra-Light Non-Stacking Rings)
+if show_turbines and turbines_in_sector:
     for t in turbines_in_sector:
         t_lat, t_lon = t["latitude"], t["longitude"]
         felt_m = t["felt_radius_miles"] * 1609.34
@@ -829,9 +912,39 @@ if show_turbines:
         </div>
         </div>
         """
-        folium.Marker([t_lat, t_lon], popup=folium.Popup(popup_html, max_width=250), icon=folium.Icon(color="cadetblue", icon="cog", prefix="fa")).add_to(m)
-        folium.Circle(radius=travel_m, location=[t_lat, t_lon], color="#8e44ad", weight=1, dash_array="3, 5", fill=True, fill_color="#8e44ad", fill_opacity=0.03).add_to(m)
-        folium.Circle(radius=felt_m, location=[t_lat, t_lon], color="#6c3483", weight=2, fill=True, fill_color="#8e44ad", fill_opacity=0.18, popup=f"Turbine Felt Zone (~1.5 mi)").add_to(m)
+        # Small 3px dot instead of large icon marker
+        folium.CircleMarker(
+            location=[t_lat, t_lon],
+            radius=3,
+            color="#2c7fb8",
+            weight=1,
+            fill=True,
+            fill_color="#41b6c4",
+            fill_opacity=0.9,
+            popup=folium.Popup(popup_html, max_width=250)
+        ).add_to(m)
+        # Outer detectable ring: outline-only dashed ring (zero fill)
+        folium.Circle(
+            radius=travel_m,
+            location=[t_lat, t_lon],
+            color="#8e44ad",
+            weight=0.8,
+            opacity=0.45,
+            dash_array="3, 5",
+            fill=False
+        ).add_to(m)
+        # Inner felt ring: ultra-light 0.02 fill so overlaps never darken the map
+        folium.Circle(
+            radius=felt_m,
+            location=[t_lat, t_lon],
+            color="#6c3483",
+            weight=1,
+            opacity=0.6,
+            fill=True,
+            fill_color="#8e44ad",
+            fill_opacity=0.02,
+            popup=f"Turbine Felt Zone (~1.5 mi)"
+        ).add_to(m)
 
 if show_user_logs and user_logs_data:
     for ulog in user_logs_data:
@@ -965,8 +1078,14 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
         col_m3.metric(label="🌲 Larson Corridors Drawn", value=larson_corridor_count if show_hotspots else 0)
 
     with panel_tab2:
-        st.markdown(f"### 🔊 Infrasound Physics & Attenuation Profiles")
+        st.markdown("### 🔊 Infrasound Physics & Attenuation Profiles")
         st.caption("Covers natural (hydrological/wind), industrial (dams/mines/turbines), and biological acoustic sources.")
+
+        st.info(
+            f"**👻/🔊 High-Strangeness & 'Ghost Frequency' (7–19 Hz) Sector Check:** "
+            f"**{woo_infrasound_overlap} of {woo_total_in_sector}** high-strangeness or sensory-dread reports in this sector fall inside an active infrasound felt zone. "
+            f"Standing waves near **18.9 Hz** (Vic Tandy's 'ghost frequency') vibrate the human ocular globe and inner ear, triggering peripheral shadow apparitions, cold sweats, sudden dread, and the intense sensation of **being watched**."
+        )
 
         for key, info in INFRASOUND_TYPES.items():
             with st.expander(f"{info['label']} — {info['freq_range']}"):
