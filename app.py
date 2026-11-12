@@ -125,8 +125,106 @@ def load_john_green_data(path="data/john_green_incidents_clean.csv"):
         })
     return records
 
+def load_renner_bfro_data(
+    local_path="data/bfro_reports_geocoded.csv",
+    fallback_url="https://raw.githubusercontent.com/timothyrenner/bfro_sightings_data/master/bfro_reports_geocoded.csv",
+):
+    import pandas as pd
+    import os
+
+    df = None
+    if os.path.exists(local_path):
+        try:
+            df = pd.read_csv(local_path)
+        except Exception:
+            try:
+                df = pd.read_csv(local_path, engine="python", on_bad_lines="skip")
+            except Exception:
+                df = None
+
+    if df is None:
+        try:
+            df = pd.read_csv(fallback_url)
+        except Exception:
+            try:
+                df = pd.read_csv(fallback_url, engine="python", on_bad_lines="skip")
+            except Exception:
+                return []
+
+    records = []
+    for _, row in df.iterrows():
+        lat_val = row.get("latitude")
+        lon_val = row.get("longitude")
+        if pd.isna(lat_val) or pd.isna(lon_val):
+            continue
+
+        raw_num = row.get("number", row.get("report_id", ""))
+        rep_id = str(int(float(raw_num))) if pd.notna(raw_num) and str(raw_num).replace(".", "", 1).isdigit() else str(raw_num).strip()
+
+        title = str(row.get("title", "BFRO Report")) if pd.notna(row.get("title")) else "BFRO Report"
+        observed = str(row.get("observed", row.get("summary", ""))) if pd.notna(row.get("observed", row.get("summary"))) else ""
+        ev_date = str(row.get("date", row.get("event_date", "N/A"))) if pd.notna(row.get("date", row.get("event_date"))) else "N/A"
+        cls_raw = str(row.get("classification", row.get("class_rating", "Unclassified"))) if pd.notna(row.get("classification", row.get("class_rating"))) else "Unclassified"
+        if cls_raw in ["Class A", "Class B", "Class C"] or "Class" in cls_raw:
+            class_rating = cls_raw
+        elif cls_raw in ["A", "B", "C"]:
+            class_rating = f"Class {cls_raw}"
+        else:
+            class_rating = cls_raw
+
+        records.append({
+            "id": rep_id,
+            "report_id": rep_id,
+            "title": title,
+            "summary": observed,
+            "latitude": float(lat_val),
+            "longitude": float(lon_val),
+            "event_date": ev_date,
+            "class_rating": class_rating,
+            "county": str(row.get("county", "")) if pd.notna(row.get("county")) else "",
+            "state": str(row.get("state", "")) if pd.notna(row.get("state")) else "",
+            "source": "BFRO (Renner Geocoded)",
+            "real_terrain_roughness": None,
+        })
+    return records
+
+
+def merge_bfro_deduplicated(primary_bfro, renner_bfro):
+    seen_ids = set()
+    seen_coord_dates = set()
+    merged = []
+
+    for rec in primary_bfro:
+        rid = str(rec.get("report_id", "")).strip()
+        if rid and rid.lower() != "nan":
+            seen_ids.add(rid)
+        lat_v, lon_v = rec.get("latitude"), rec.get("longitude")
+        if lat_v is not None and lon_v is not None:
+            seen_coord_dates.add((round(float(lat_v), 3), round(float(lon_v), 3), str(rec.get("event_date", "N/A")).strip()))
+        merged.append(rec)
+
+    for rec in renner_bfro:
+        rid = str(rec.get("report_id", "")).strip()
+        if rid and rid in seen_ids:
+            continue
+        lat_v, lon_v = rec.get("latitude"), rec.get("longitude")
+        if lat_v is None or lon_v is None:
+            continue
+        coord_key = (round(float(lat_v), 3), round(float(lon_v), 3), str(rec.get("event_date", "N/A")).strip())
+        if coord_key in seen_coord_dates:
+            continue
+        if rid:
+            seen_ids.add(rid)
+        seen_coord_dates.add(coord_key)
+        merged.append(rec)
+
+    return merged
+
+
+raw_sightings_renner = load_renner_bfro_data()
+raw_sightings_bfro_merged = merge_bfro_deduplicated(raw_sightings_bfro, raw_sightings_renner)
 raw_sightings_john_green = load_john_green_data()
-raw_sightings = raw_sightings_bfro + raw_sightings_john_green
+raw_sightings = raw_sightings_bfro_merged + raw_sightings_john_green
 raw_lore = load_and_standardize_dataset("data/indigenous_lore.csv")
 raw_news = load_and_standardize_dataset("data/press_archives.csv")
 raw_camps = load_and_standardize_dataset("data/campsites.csv")
