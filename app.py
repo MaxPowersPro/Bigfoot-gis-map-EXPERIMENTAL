@@ -1,7 +1,8 @@
 import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, MultiPolygon
+from shapely.ops import unary_union
 import sqlite3
 from streamlit_js_eval import get_geolocation
 import random
@@ -54,18 +55,37 @@ def load_bfro_clean_data(path="data/bfro_reports_clean.csv"):
         })
     return records
 
-def load_bfro_renner_data(path="data/bfro_reports_geocoded.csv"):
+@st.cache_data(ttl=86400)
+def load_bfro_renner_data(local_path="data/bfro_reports_geocoded.csv"):
     import pandas as pd
     import os
-    if not os.path.exists(path):
-        return []
-    try:
-        df = pd.read_csv(path)
-    except Exception:
+
+    fallback_urls = [
+        "https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-11-15/bfro_reports_geocoded.csv",
+        "https://raw.githubusercontent.com/timothyrenner/bfro_sightings_data/master/bfro_reports_geocoded.csv",
+    ]
+
+    df = None
+    if os.path.exists(local_path):
         try:
-            df = pd.read_csv(path, engine="python", on_bad_lines="skip")
+            df = pd.read_csv(local_path)
         except Exception:
-            return []
+            try:
+                df = pd.read_csv(local_path, engine="python", on_bad_lines="skip")
+            except Exception:
+                df = None
+
+    if df is None:
+        for url in fallback_urls:
+            try:
+                df = pd.read_csv(url)
+                if df is not None and not df.empty:
+                    break
+            except Exception:
+                continue
+
+    if df is None or df.empty:
+        return []
 
     records = []
     for _, row in df.iterrows():
@@ -73,12 +93,12 @@ def load_bfro_renner_data(path="data/bfro_reports_geocoded.csv"):
         lon_val = row.get("longitude")
         if pd.isna(lat_val) or pd.isna(lon_val):
             continue
-        raw_num = row.get("number", "")
-        rep_id = str(int(raw_num)) if pd.notna(raw_num) and str(raw_num).replace(".0", "").isdigit() else str(raw_num)
+        raw_num = row.get("number", row.get("report_id", ""))
+        rep_id = str(int(float(raw_num))) if pd.notna(raw_num) and str(raw_num).replace(".", "", 1).isdigit() else str(raw_num)
         title_val = str(row.get("title", "")) if pd.notna(row.get("title")) else f"BFRO Report #{rep_id}"
-        observed_val = str(row.get("observed", "")) if pd.notna(row.get("observed")) else ""
-        date_val = str(row.get("date", "N/A")) if pd.notna(row.get("date")) else "N/A"
-        class_val = str(row.get("classification", "Unclassified")) if pd.notna(row.get("classification")) else "Unclassified"
+        observed_val = str(row.get("observed", row.get("summary", ""))) if pd.notna(row.get("observed", row.get("summary", ""))) else ""
+        date_val = str(row.get("date", row.get("event_date", "N/A"))) if pd.notna(row.get("date", row.get("event_date", "N/A"))) else "N/A"
+        class_val = str(row.get("classification", row.get("class_rating", "Unclassified"))) if pd.notna(row.get("classification", row.get("class_rating", "Unclassified"))) else "Unclassified"
         county_val = str(row.get("county", "")) if pd.notna(row.get("county")) else ""
 
         records.append({
@@ -191,11 +211,11 @@ def fetch_usgs_wind_turbines(target_lat, target_lon, radius_miles):
     deg_r = radius_miles / 69.0
     min_lat, max_lat = target_lat - deg_r, target_lat + deg_r
     min_lon, max_lon = target_lon - deg_r, target_lon + deg_r
-    
+
     url = f"https://energy.usgs.gov/api/uswtdb/v1/turbines?ylat=gte.{min_lat}&ylat=lte.{max_lat}&xlong=gte.{min_lon}&xlong=lte.{max_lon}"
     turbines = []
     try:
-        resp = requests.get(url, timeout=5)
+        resp = requests.get(url, timeout=6)
         if resp.status_code == 200:
             data = resp.json()
             for row in data:
@@ -204,7 +224,7 @@ def fetch_usgs_wind_turbines(target_lat, target_lon, radius_miles):
                 if dist <= radius_miles:
                     turbines.append({
                         "id": row.get("case_id"),
-                        "project_name": row.get("p_name", "Wind Project"),
+                        "project_name": row.get("p_name", "Wind Energy Project"),
                         "latitude": t_lat,
                         "longitude": t_lon,
                         "hub_height_m": row.get("t_hh", "N/A"),
@@ -276,7 +296,7 @@ with st.expander("📱 How to Use Maxquest & Master Field Navigation Guide", exp
         * **🪹 Orange Dotted Rings:** Predictive Refuges — high inferred habitat quality with no direct sightings nearby.
         * **🌲 Green Channels:** Larson transit corridors (≤20 miles) connecting nearby Hot Zones along natural terrain gaps.
         * **🔊 Purple Marker:** Infrasound source (waterfalls, dams, wind gaps). Bold inner ring = felt zone; light outer ring = detectable zone.
-        * **💨 Wind Turbines (Teal Dots):** Industrial turbine stems. Thin inner ring = felt zone (~1.5 mi); dashed outer ring = detectable zone (~6 mi).
+        * **💨 Wind Turbines (Merged Purple Zone):** Single unified felt-zone footprint (~1.5 mi) with one central turbine marker and USGS data link.
         * **🏕️ Green Campgrounds:** Dispersed campsites and backcountry staging points.
         """)
     with col_g3:
@@ -371,6 +391,21 @@ def haversine_miles(lat1, lon1, lat2, lon2):
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
     return R * c
 
+def generate_tone_wav(freq_hz=12.0, duration_sec=3.0, sample_rate=8000):
+    t = np.linspace(0, duration_sec, int(sample_rate * duration_sec), endpoint=False)
+    # Audible carrier modulated at the low infrasound pulse frequency so standard speakers can demonstrate the rhythm
+    carrier = np.sin(2 * np.pi * 110.0 * t)
+    modulator = 0.5 * (1.0 + np.sin(2 * np.pi * freq_hz * t))
+    signal = (carrier * modulator * 0.6 * 32767).astype(np.int16)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(signal.tobytes())
+    buf.seek(0)
+    return buf.read()
+
 # --- Infrasound Master Categories ---
 INFRASOUND_TYPES = {
     "waterfall": {"label": "🌊 Waterfall / Hydrological", "cause": "High-volume water impact at waterfalls, rapids, or river spillways.", "freq_range": "3 – 15 Hz", "character": "Continuous rumble.", "felt_miles": 12, "travel_miles": 80, "effect": "Falls mostly in the vestibular resonance band (1-7 Hz) — dizziness, pressure headaches, and loss of balance are the most commonly reported effects within the felt zone."},
@@ -407,6 +442,7 @@ RANGE_BASED_BIOLOGICAL_SPECIES = {
 
 BIO_SPECIES_LISTEN_LINKS = {
     "Ruffed Grouse": "https://search.macaulaylibrary.org/catalog?taxonCode=rufgro",
+    "American Alligator": "https://search.macaulaylibrary.org/catalog?taxonCode=ameall",
 }
 
 def classify_infrasound_type(event_type_str):
@@ -824,6 +860,7 @@ st.markdown(f"""
 🪶 Regional Lore: <b><code>{len(lore_data)}</code></b> &nbsp;|&nbsp;
 📰 Press Archives: <b><code>{len(media_data)}</code></b> &nbsp;|&nbsp;
 🔊 Infrasound Waves: <b><code>{len(audio_data)}</code></b> &nbsp;|&nbsp;
+💨 Turbines: <b><code>{len(turbines_in_sector)}</code></b> &nbsp;|&nbsp;
 🏕️ Campsites: <b><code>{len(camps_data)}</code></b>
 </div>
 """, unsafe_allow_html=True)
@@ -876,6 +913,30 @@ if show_bfro and sightings_data:
         footprint_svg = f"""<svg width="18" height="18" viewBox="0 0 24 24" style="filter: drop-shadow(0 0 1px white);"><ellipse cx="12" cy="15" rx="4.2" ry="8.5" fill="{pin_color}"/><ellipse cx="7.5" cy="5" rx="1.3" ry="2.1" fill="{pin_color}"/><ellipse cx="10.5" cy="3.2" rx="1.4" ry="2.3" fill="{pin_color}"/><ellipse cx="13.7" cy="3.5" rx="1.3" ry="2.2" fill="{pin_color}"/><ellipse cx="16.5" cy="5" rx="1.2" ry="1.9" fill="{pin_color}"/><ellipse cx="18.7" cy="7.5" rx="1.0" ry="1.5" fill="{pin_color}"/></svg>"""
         folium.Marker([j_lat, j_lon], popup=folium.Popup(popup_html, max_width=280), icon=folium.DivIcon(html=footprint_svg, icon_size=(20, 20), icon_anchor=(10, 16))).add_to(m)
 
+if show_lore and lore_data:
+    for l_rec in lore_data:
+        l_lat, l_lon = float(l_rec.get("latitude", lat)), float(l_rec.get("longitude", lon))
+        l_popup = f"""
+        <div style="font-family:sans-serif; width:240px;">
+        <b>🪶 {l_rec.get('name', l_rec.get('title', 'Indigenous Lore'))}</b><br>
+        <small><b>Nation/Region:</b> {l_rec.get('tribe', l_rec.get('region', 'Regional'))}</small><br>
+        <p style="font-size:10px; margin:4px 0;">{str(l_rec.get('summary', l_rec.get('description', '')))[:180]}...</p>
+        </div>
+        """
+        folium.Marker([l_lat, l_lon], popup=folium.Popup(l_popup, max_width=260), icon=folium.Icon(color="darkred", icon="feather", prefix="fa")).add_to(m)
+
+if show_news and media_data:
+    for m_rec in media_data:
+        m_lat, m_lon = float(m_rec.get("latitude", lat)), float(m_rec.get("longitude", lon))
+        m_popup = f"""
+        <div style="font-family:sans-serif; width:240px;">
+        <b>📰 {m_rec.get('title', 'Historical Press Clipping')}</b><br>
+        <small><b>Date:</b> {m_rec.get('date', 'N/A')} | <b>Publication:</b> {m_rec.get('publication', 'Archive')}</small><br>
+        <p style="font-size:10px; margin:4px 0;">{str(m_rec.get('summary', ''))[:180]}...</p>
+        </div>
+        """
+        folium.Marker([m_lat, m_lon], popup=folium.Popup(m_popup, max_width=260), icon=folium.Icon(color="lightgray", icon="newspaper", prefix="fa")).add_to(m)
+
 if show_camps and camps_data:
     for c in camps_data:
         c_popup = f"<b>🏕️ {c.get('name', 'Campsite')}</b><br><small>Type: {c.get('type', 'Primitive / Dispersed')}</small>"
@@ -891,59 +952,74 @@ if show_audio and audio_data:
         if not a.get("is_offscreen"):
             folium.Marker([a["latitude"], a["longitude"]], popup=a_popup, icon=folium.Icon(color="purple", icon="volume-up", prefix="fa")).add_to(m)
         folium.Circle(radius=travel_m, location=[a["latitude"], a["longitude"]], color="#8e44ad", weight=1, dash_array="4, 6", fill=False, popup=f"Detectable footprint (~{a['prop_radius_miles']} mi)").add_to(m)
-        folium.Circle(radius=felt_m, location=[a["latitude"], a["longitude"]], color="#6c3483", weight=1.5, fill=True, fill_color="#8e44ad", fill_opacity=0.04, popup=f"Felt zone (~{a.get('felt_radius_miles', 8)} mi)").add_to(m)
+        folium.Circle(radius=felt_m, location=[a["latitude"], a["longitude"]], color="#6c3483", weight=1.5, fill=True, fill_color="#8e44ad", fill_opacity=0.08, popup=f"Felt zone (~{a.get('felt_radius_miles', 8)} mi)").add_to(m)
 
-# Layer 8: USGS Wind Turbines (Minimalist 3px Dots + Ultra-Light Non-Stacking Rings)
+# Layer 8: USGS Wind Turbines — Merged Amorphous Purple Shape + Single Icon per Cluster
 if show_turbines and turbines_in_sector:
+    felt_deg = 1.5 / 69.0
+    turbine_buffers = []
     for t in turbines_in_sector:
-        t_lat, t_lon = t["latitude"], t["longitude"]
-        felt_m = t["felt_radius_miles"] * 1609.34
-        travel_m = t["prop_radius_miles"] * 1609.34
-        
-        popup_html = f"""
-        <div style="font-family:sans-serif; width:220px;">
-        <b>💨 Wind Turbine (USGS)</b><br>
-        <small><b>Project:</b> {t['project_name']}</small><br>
-        <small><b>Hub Height:</b> {t['hub_height_m']}m | <b>Capacity:</b> {t['capacity_kw']} kW</small>
-        <hr style="margin:4px 0;">
-        <div style="font-size:9px; background:#f4f0fa; padding:4px; border-left:3px solid #8e44ad;">
-        🔊 <b>Felt Zone:</b> ~1.5 mi (Inner Ring)<br>
-        🔊 <b>Detectable Footprint:</b> ~6.0 mi (Outer Ring)
-        </div>
+        # Approximate metric buffer in degrees accounting for latitude cosine scaling
+        lat_rad = np.radians(t["latitude"])
+        pt = Point(t["longitude"] * np.cos(lat_rad), t["latitude"])
+        turbine_buffers.append((pt.buffer(felt_deg), t))
+
+    merged_geom = unary_union([b[0] for b in turbine_buffers])
+    if isinstance(merged_geom, Polygon):
+        cluster_polys = [merged_geom]
+    elif isinstance(merged_geom, MultiPolygon):
+        cluster_polys = list(merged_geom.geoms)
+    else:
+        cluster_polys = []
+
+    for poly in cluster_polys:
+        # Match turbines inside this merged amorphous polygon
+        cluster_turbines = [t for buf, t in turbine_buffers if poly.intersects(buf)]
+        project_names = sorted({t["project_name"] for t in cluster_turbines if t.get("project_name")})
+        proj_title = ", ".join(project_names[:2]) + (f" (+{len(project_names)-2} more)" if len(project_names) > 2 else "")
+        if not proj_title:
+            proj_title = "Regional Wind Energy Cluster"
+
+        centroid = poly.centroid
+        c_lat = centroid.y
+        c_lon = centroid.x / max(0.1, np.cos(np.radians(c_lat)))
+
+        # Unscale exterior coordinates back to standard (lat, lon) pairs for Folium
+        exterior_coords = [
+            [y, x / max(0.1, np.cos(np.radians(y)))]
+            for x, y in poly.exterior.coords
+        ]
+
+        cluster_popup_html = f"""
+        <div style="font-family:sans-serif; width:270px;">
+        <b style="color:#6c3483;">💨 Industrial Wind Turbine Infrasound Zone</b><br>
+        <small><b>Facility:</b> {proj_title} ({len(cluster_turbines)} turbines)</small>
+        <hr style="margin:5px 0;">
+        <p style="font-size:10px; margin:3px 0;">
+        <b>What & Why:</b> Rotating turbine blades generate periodic low-frequency pressure pulses (<b>0.5–20 Hz</b>) every time a blade passes the tower. Within this <b>~1.5-mile felt zone</b>, overlapping waves can trigger inner-ear pressure, mild dizziness, restlessness, or a sense of unease ("ghost frequency" 7–19 Hz overlap) that may be mistaken for an unexplained presence.
+        </p>
+        <a href="https://energy.usgs.gov/uswtdb/" target="_blank" style="display:inline-block; margin-top:4px; padding:4px 7px; background:#6c3483; color:white; border-radius:3px; text-decoration:none; font-size:10px;">
+        🌐 Verify on USGS Wind Turbine Database
+        </a>
         </div>
         """
-        # Small 3px dot instead of large icon marker
-        folium.CircleMarker(
-            location=[t_lat, t_lon],
-            radius=3,
-            color="#2c7fb8",
-            weight=1,
-            fill=True,
-            fill_color="#41b6c4",
-            fill_opacity=0.9,
-            popup=folium.Popup(popup_html, max_width=250)
-        ).add_to(m)
-        # Outer detectable ring: outline-only dashed ring (zero fill)
-        folium.Circle(
-            radius=travel_m,
-            location=[t_lat, t_lon],
-            color="#8e44ad",
-            weight=0.8,
-            opacity=0.45,
-            dash_array="3, 5",
-            fill=False
-        ).add_to(m)
-        # Inner felt ring: ultra-light 0.02 fill so overlaps never darken the map
-        folium.Circle(
-            radius=felt_m,
-            location=[t_lat, t_lon],
+
+        # Single smooth, amorphous purple polygon (zero overlapping fill darkening)
+        folium.Polygon(
+            locations=exterior_coords,
             color="#6c3483",
-            weight=1,
-            opacity=0.6,
+            weight=1.5,
             fill=True,
             fill_color="#8e44ad",
-            fill_opacity=0.02,
-            popup=f"Turbine Felt Zone (~1.5 mi)"
+            fill_opacity=0.14,
+            popup=folium.Popup(cluster_popup_html, max_width=290)
+        ).add_to(m)
+
+        # Single clean turbine icon at the center of the merged purple zone
+        folium.Marker(
+            location=[c_lat, c_lon],
+            popup=folium.Popup(cluster_popup_html, max_width=290),
+            icon=folium.Icon(color="cadetblue", icon="fan", prefix="fa")
         ).add_to(m)
 
 if show_user_logs and user_logs_data:
@@ -961,6 +1037,7 @@ if show_user_logs and user_logs_data:
         folium.Marker([ulog["latitude"], ulog["longitude"]], popup=folium.Popup(log_popup, max_width=280), icon=folium.Icon(color="green" if has_facts else "orange", icon="clipboard", prefix="fa")).add_to(m)
 
 ground_truth_hubs, predictive_refuges = [], []
+larson_corridor_count = 0
 combined_evidence_points = [
     {"lat": float(s["latitude"]), "lon": float(s["longitude"]), "weight": float(s.get("evidence_weight", 1.0)), "esi": float(s.get("esi_score", 0.5))}
     for s in sightings_data if not filter_urban(float(s["latitude"]), float(s["longitude"]))
@@ -1036,7 +1113,6 @@ if show_hotspots and combined_evidence_points:
         folium.Circle(radius=12000, location=[ref['lat'], ref['lon']], color="#d35400", weight=2, dash_array="8, 8", fill=True, fill_color="#e67e22", fill_opacity=0.18, popup=ref_popup).add_to(m)
 
     LARSON_MAX_DEG = st.session_state.param_corridor_max_mi / 69.0
-    larson_corridor_count = 0
     if len(ground_truth_hubs) > 1:
         connected_pairs = set()
         for i in range(len(ground_truth_hubs)):
@@ -1060,7 +1136,7 @@ if show_hotspots and combined_evidence_points:
 
 st_folium(m, width="100%", height=500, key=f"map_{lat:.2f}_{lon:.2f}")
 
-# --- Infrasound & Regional Intel Drawer ---
+# --- Integrated Regional Intelligence Drawer (All Original Tabs & Features Intact) ---
 st.markdown("---")
 with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc_name} ({active_state})", expanded=True):
     panel_tab1, panel_tab2, panel_tab3, panel_tab4 = st.tabs([
@@ -1077,6 +1153,27 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
         col_m2.metric(label="🪹 Predictive Refuges Found", value=len(predictive_refuges))
         col_m3.metric(label="🌲 Larson Corridors Drawn", value=larson_corridor_count if show_hotspots else 0)
 
+        if seasonal_breakdown:
+            st.markdown("#### 📅 Seasonal Breakdown in Sector")
+            s_cols = st.columns(len(seasonal_breakdown))
+            for idx, (s_name, s_count) in enumerate(seasonal_breakdown.items()):
+                s_cols[idx].metric(s_name, s_count)
+
+        evidence_scan = scan_evidence_patterns(sightings_data)
+        if any(evidence_scan.values()):
+            st.markdown("#### 🔍 Behavioral & Physical Evidence Breakdown")
+            ev_cols = st.columns(len(EVIDENCE_CATEGORIES))
+            for idx, (cat_name, matches) in enumerate(evidence_scan.items()):
+                ev_cols[idx].metric(cat_name, len(matches))
+
+        with st.expander("🎛️ Model Parameter Tuning (Hot Zones, Refuges & Corridors)", expanded=False):
+            c_p1, c_p2 = st.columns(2)
+            st.session_state.param_hotzone_radius_mi = c_p1.slider("Hot Zone Clustering Radius (mi)", 5.0, 35.0, float(st.session_state.param_hotzone_radius_mi), 1.0)
+            st.session_state.param_report_gap_mi = c_p2.slider("Predictive Refuge Min Gap from Reports (mi)", 5.0, 30.0, float(st.session_state.param_report_gap_mi), 1.0)
+            st.session_state.param_esi_threshold = c_p1.slider("Environmental Suitability Index (ESI) Threshold", 0.30, 0.85, float(st.session_state.param_esi_threshold), 0.05)
+            st.session_state.param_corridor_max_mi = c_p2.slider("Larson Corridor Max Span (mi)", 5.0, 50.0, float(st.session_state.param_corridor_max_mi), 1.0)
+            st.session_state.param_effort_k = st.slider("Human Effort Bias Penalty (k)", 0.0, 2.0, float(st.session_state.param_effort_k), 0.1)
+
     with panel_tab2:
         st.markdown("### 🔊 Infrasound Physics & Attenuation Profiles")
         st.caption("Covers natural (hydrological/wind), industrial (dams/mines/turbines), and biological acoustic sources.")
@@ -1087,20 +1184,84 @@ with st.expander(f"📊 Integrated Regional Intelligence — Active Sector: {loc
             f"Standing waves near **18.9 Hz** (Vic Tandy's 'ghost frequency') vibrate the human ocular globe and inner ear, triggering peripheral shadow apparitions, cold sweats, sudden dread, and the intense sensation of **being watched**."
         )
 
+        st.markdown("#### 📐 Attenuation & Effort-Adjusted Weighting Formulas")
+        st.latex(r"W_{\text{adj}} = \frac{W_{\text{base}}}{1 + k \cdot E_{\text{human}}}, \quad E_{\text{human}} = \left(\frac{\rho_{\text{pop}}}{50}\right) \cdot \left(\frac{1}{d_{\text{road}} + 0.1}\right)")
+        st.latex(r"\text{ESI} = 0.35\,\text{SC}_m + 0.25\,S_{\text{water}} + 0.20\,R_{\text{terrain}} + 0.20\,B_{\text{ungulate}}")
+
         for key, info in INFRASOUND_TYPES.items():
             with st.expander(f"{info['label']} — {info['freq_range']}"):
                 st.write(f"**Cause:** {info['cause']}")
                 st.write(f"**Character:** {info['character']}")
                 st.write(f"**Felt Zone:** ~{info['felt_miles']} miles | **Detectable Footprint:** ~{info['travel_miles']} miles")
                 st.caption(info["effect"])
+                if key == "turbine":
+                    st.markdown("[🌐 Official USGS Wind Turbine Database (USWTDB)](https://energy.usgs.gov/uswtdb/)")
+
+        st.markdown("#### 🎧 Infrasound Pulse Rhythm Simulator")
+        demo_hz = st.slider("Select Low-Frequency Pulse Rate (Hz) to Audition Rhythm:", 1.0, 19.0, 12.0, 0.5)
+        st.audio(generate_tone_wav(freq_hz=demo_hz), format="audio/wav")
+        st.caption("Modulated 110 Hz carrier demonstrating the physical cadence of low-frequency infrasound pulses on standard speakers.")
 
     with panel_tab3:
         st.markdown("### 🦉 Bioacoustics & Misidentification")
-        st.write("Common species whose calls or tracks mimic unexplained activity: Barred Owls, Eastern Coyotes, White-Tailed Deer, Black Bears.")
+        st.write("Common wildlife species whose calls, wing-drumming, or territorial displays produce sub-audible pulses or mimic unexplained vocalizations.")
+
+        if applicable_bio_species:
+            st.markdown(f"#### 📍 Range-Verified Infrasonic Wildlife in {active_state}")
+            for sp_name, sp_info in applicable_bio_species:
+                with st.expander(f"🔊 {sp_name} ({sp_info['frequency']})"):
+                    st.write(sp_info["description"])
+                    st.caption(sp_info["citation"])
+                    if sp_name in BIO_SPECIES_LISTEN_LINKS:
+                        st.markdown(f"[🎧 Listen to Verified Field Recordings (Cornell Macaulay Library)]({BIO_SPECIES_LISTEN_LINKS[sp_name]})")
+        else:
+            st.info(f"No specialized range-restricted infrasonic species flagged specifically for {active_state}; general regional mimics apply.")
+
+        st.markdown("#### 🌲 General North American Acoustic Mimics")
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            st.write("* **Barred Owl:** Duetting territorial calls often mistaken for primate whoops or distant conversation.")
+            st.write("* **Eastern / Western Coyote:** Pack yip-howls echoing through valleys mimic prolonged vocalizations.")
+        with col_b2:
+            st.write("* **White-Tailed Deer / Elk:** Alarm snorts, bugles, and heavy brush crashes at night.")
+            st.write("* **American Black Bear:** Jaw-popping, huffing, and bipedal curiosity stands.")
 
     with panel_tab4:
-        st.markdown("### 🗂️ Regional Lore & Press Records")
-        st.write(f"Regional data indexed for {active_state}.")
+        st.markdown("### 🗂️ Regional Lore, Press Archives & Researcher Findings")
+        st.write(f"Showing indexed historical and cultural records near **{loc_name}** ({active_state}).")
+
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            st.markdown(f"#### 🪶 Indigenous Lore ({len(lore_data)} local / {len(all_lore_records)} total)")
+            if lore_data:
+                for lr in lore_data[:10]:
+                    with st.expander(f"{lr.get('name', lr.get('title', 'Lore Record'))} ({lr.get('tribe', 'Regional')})"):
+                        st.write(lr.get("summary", lr.get("description", "No summary available.")))
+                        if lr.get("source"):
+                            st.caption(f"Source: {lr.get('source')}")
+            else:
+                st.caption("No localized indigenous lore entries within relevance radius of this center.")
+
+        with col_r2:
+            st.markdown(f"#### 📰 Historical Press Archives ({len(media_data)} local / {len(all_press_records)} total)")
+            if media_data:
+                for pr in media_data[:10]:
+                    with st.expander(f"{pr.get('title', 'Press Clipping')} ({pr.get('date', 'N/A')})"):
+                        st.write(pr.get("summary", "No summary available."))
+                        if pr.get("publication"):
+                            st.caption(f"Publication: {pr.get('publication')}")
+            else:
+                st.caption("No localized press clippings within relevance radius of this center.")
+
+        st.markdown("---")
+        st.markdown("#### 📚 Researcher Archives & Grover Krantz Finding Aid")
+        st.markdown(f"[📄 Open Grover Krantz Finding Aid PDF (GitHub Archive)]({KRANTZ_PDF_URL})")
+        if raw_researcher_archives:
+            with st.expander(f"Browse Researcher Archive Index ({len(raw_researcher_archives)} entries)"):
+                st.dataframe(raw_researcher_archives, use_container_width=True)
+        if all_junk_records:
+            with st.expander(f"🗃️ Unclassified / Supplemental Field Notes ({len(all_junk_records)} records)"):
+                st.dataframe(all_junk_records, use_container_width=True)
 
 # --- Field Log Submission ---
 with st.expander("📝 Submit Investigator Field Log", expanded=False):
