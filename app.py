@@ -1099,7 +1099,7 @@ if show_bfro and sightings_data:
         ).add_to(m)
 
 if show_camps and camps_data:
-    camp_cluster = MarkerCluster(name="Campsites", disableClusteringAtZoom=11).add_to(m)
+    
     for c in camps_data:
         c_name = c.get("name", "Dispersed Campsite")
         c_type = c.get("type", "Primitive / Dispersed")
@@ -1123,7 +1123,7 @@ if show_camps and camps_data:
             popup=c_popup,
             tooltip=fkey,
             icon=folium.Icon(color="green", icon="campground", prefix="fa"),
-        ).add_to(camp_cluster)
+        ).add_to(m)
 
 if show_audio and audio_data:
     for a in audio_data:
