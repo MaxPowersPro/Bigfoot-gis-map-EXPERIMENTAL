@@ -1425,8 +1425,8 @@ map_state = st_folium(
     m,
     width="100%",
     height=500,
-    key=f"map_{lat:.2f}_{lon:.2f}",
-    returned_objects=["last_object_clicked", "last_object_clicked_tooltip"],
+    key=f"map_{lat:.2f}_{lon:.2f}"
+    
 )
 
 # Resolve clicked map feature into session_state so full details stay pinned in the drawer below
